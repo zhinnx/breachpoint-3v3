@@ -11,6 +11,28 @@ import * as THREE from 'three';
 
 const cache = new Map();
 
+/**
+ * Active texture tier. Set before materials are first requested so the whole
+ * atlas is generated at the right resolution (PRD §3.3: per-tier variants,
+ * not one texture downscaled at runtime).
+ */
+let TEX_SIZE = 512;
+let TEX_DETAIL = 0.8;
+let TEX_ANISO = 4;
+
+export function setTextureTier({ textureSize, textureDetail, anisotropy }) {
+  const changed = textureSize !== TEX_SIZE;
+  TEX_SIZE = textureSize;
+  TEX_DETAIL = textureDetail;
+  TEX_ANISO = anisotropy;
+  if (changed) cache.clear();
+  return changed;
+}
+
+export function getTextureTier() {
+  return { TEX_SIZE, TEX_DETAIL, TEX_ANISO };
+}
+
 function canvas(size = 256) {
   const c = document.createElement('canvas');
   c.width = c.height = size;
@@ -21,7 +43,11 @@ function toTexture(c, repeat = 1, srgb = false) {
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.repeat.set(repeat, repeat);
-  t.anisotropy = 4;
+  t.anisotropy = TEX_ANISO;
+  // Low tier deliberately drops mip filtering quality for fill-rate.
+  t.minFilter = TEX_SIZE <= 256 ? THREE.LinearMipmapLinearFilter : THREE.LinearMipmapLinearFilter;
+  t.magFilter = TEX_SIZE <= 256 ? THREE.NearestFilter : THREE.LinearFilter;
+  t.generateMipmaps = true;
   if (srgb) t.colorSpace = THREE.SRGBColorSpace;
   return t;
 }
@@ -104,7 +130,7 @@ function normalFromHeight(src, strength = 2.2) {
 }
 
 // ------------------------------------------------------------------ surface generators
-function rustCanvas(size = 256) {
+function rustCanvas(size = TEX_SIZE) {
   const c = noiseCanvas(size, 5, 0.42, 0.85, [1, 1, 1]);
   const ctx = c.getContext('2d');
   // rust blotches
@@ -140,7 +166,7 @@ function rustCanvas(size = 256) {
   return c;
 }
 
-function concreteCanvas(size = 256) {
+function concreteCanvas(size = TEX_SIZE) {
   const c = noiseCanvas(size, 5, 0.55, 0.35);
   const ctx = c.getContext('2d');
   // pitting
@@ -174,7 +200,7 @@ function concreteCanvas(size = 256) {
   return c;
 }
 
-function metalPlateCanvas(size = 256) {
+function metalPlateCanvas(size = TEX_SIZE) {
   const c = noiseCanvas(size, 4, 0.6, 0.22);
   const ctx = c.getContext('2d');
   // panel seams
@@ -212,7 +238,7 @@ function metalPlateCanvas(size = 256) {
   return c;
 }
 
-function grateCanvas(size = 256) {
+function grateCanvas(size = TEX_SIZE) {
   const c = canvas(size);
   const ctx = c.getContext('2d');
   ctx.fillStyle = '#1b1d20';
@@ -235,7 +261,7 @@ function grateCanvas(size = 256) {
   return c;
 }
 
-function gravelCanvas(size = 256) {
+function gravelCanvas(size = TEX_SIZE) {
   const c = noiseCanvas(size, 6, 0.4, 0.7);
   const ctx = c.getContext('2d');
   for (let i = 0; i < 900; i++) {
@@ -250,7 +276,7 @@ function gravelCanvas(size = 256) {
   return c;
 }
 
-function woodCanvas(size = 256) {
+function woodCanvas(size = TEX_SIZE) {
   const c = canvas(size);
   const ctx = c.getContext('2d');
   ctx.fillStyle = '#6b4a2a';
@@ -276,7 +302,7 @@ function woodCanvas(size = 256) {
   return c;
 }
 
-function gunmetalCanvas(size = 128) {
+function gunmetalCanvas(size = Math.max(128, TEX_SIZE / 2)) {
   const c = noiseCanvas(size, 4, 0.55, 0.28);
   const ctx = c.getContext('2d');
   ctx.globalAlpha = 0.3;
@@ -301,14 +327,69 @@ function make(name, builder) {
   return m;
 }
 
+/**
+ * Inject per-instance UV tiling into a standard material.
+ *
+ * The map is drawn as instanced unit cubes scaled per brush, so shared UVs
+ * stretch on large brushes. This adds an `uvScale` instanced attribute and
+ * multiplies the UV in the vertex shader, giving constant texel density
+ * without needing unique geometry per brush.
+ */
+function withInstancedUV(material) {
+  material.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+         attribute vec2 uvScale;
+         varying vec2 vUvScale;`,
+      )
+      .replace(
+        '#include <uv_vertex>',
+        `#include <uv_vertex>
+         vUvScale = uvScale;`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        `#include <common>
+         varying vec2 vUvScale;`,
+      )
+      .replace(
+        '#include <map_fragment>',
+        `#ifdef USE_MAP
+           vec4 sampledDiffuseColor = texture2D( map, vMapUv * vUvScale );
+           diffuseColor *= sampledDiffuseColor;
+         #endif`,
+      )
+      .replace(
+        '#include <normal_fragment_maps>',
+        `#ifdef USE_NORMALMAP_OBJECTSPACE
+           normal = texture2D( normalMap, vNormalMapUv * vUvScale ).xyz * 2.0 - 1.0;
+           normal = normalize( normalMatrix * normal );
+         #elif defined( USE_NORMALMAP_TANGENTSPACE )
+           vec3 mapN = texture2D( normalMap, vNormalMapUv * vUvScale ).xyz * 2.0 - 1.0;
+           mapN.xy *= normalScale;
+           normal = normalize( tbn * mapN );
+         #elif defined( USE_BUMPMAP )
+           normal = perturbNormalArb( - vViewPosition, normal, dHdxy_fwd(), faceDirection );
+         #endif`,
+      );
+  };
+  // Force a distinct program so the injected version is not shared with
+  // non-instanced users of the same material settings.
+  material.customProgramCacheKey = () => 'bp-instanced-uv';
+  return material;
+}
+
 export function getMapMaterials() {
   return make('mapMaterials', () => {
-    const rust = rustCanvas(256);
-    const concrete = concreteCanvas(256);
-    const plate = metalPlateCanvas(256);
-    const grate = grateCanvas(256);
-    const gravel = gravelCanvas(256);
-    const wood = woodCanvas(256);
+    const rust = rustCanvas(TEX_SIZE);
+    const concrete = concreteCanvas(TEX_SIZE);
+    const plate = metalPlateCanvas(TEX_SIZE);
+    const grate = grateCanvas(TEX_SIZE);
+    const gravel = gravelCanvas(TEX_SIZE);
+    const wood = woodCanvas(TEX_SIZE);
 
     const rustTex = toTexture(rust, 1, true);
     const rustNrm = toTexture(normalFromHeight(rust, 2.6));
@@ -323,7 +404,7 @@ export function getMapMaterials() {
     const woodTex = toTexture(wood, 1, true);
     const woodNrm = toTexture(normalFromHeight(wood, 2.0));
 
-    const mk = (opts) => new THREE.MeshStandardMaterial({ ...opts });
+    const mk = (opts) => withInstancedUV(new THREE.MeshStandardMaterial({ ...opts }));
 
     return {
       rustWall: mk({ color: '#6e5a4a', map: rustTex, normalMap: rustNrm, roughness: 0.92, metalness: 0.35, normalScale: new THREE.Vector2(1.1, 1.1) }),
@@ -421,9 +502,15 @@ export function getOperatorMaterials(team) {
     const plateTex = toTexture(plate, 1, true);
     const plateNrm = toTexture(normalFromHeight(plate, 1.8));
     return {
-      fatigues: new THREE.MeshStandardMaterial({ color: '#33372f', roughness: 0.92, metalness: 0.03 }),
+      fatigues: new THREE.MeshStandardMaterial({
+        color: team === 'BLUE' ? '#3f4a52' : '#4f4038',
+        roughness: 0.92, metalness: 0.03,
+      }),
       vest: new THREE.MeshStandardMaterial({ color: '#23262a', map: plateTex, normalMap: plateNrm, roughness: 0.78, metalness: 0.18 }),
-      accent: new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: 0.55, roughness: 0.5, metalness: 0.2 }),
+      // Team accent is trim, not the whole uniform. The emissive was strong
+      // enough that distant operators read as flat coloured blobs rather than
+      // people, which also made them hard to range.
+      accent: new THREE.MeshStandardMaterial({ color: accent, emissive: accent, emissiveIntensity: 0.18, roughness: 0.6, metalness: 0.2 }),
       gloves: new THREE.MeshStandardMaterial({ color: '#1c1e21', roughness: 0.85, metalness: 0.06 }),
       skin: new THREE.MeshStandardMaterial({ color: '#b58b6b', roughness: 0.72, metalness: 0.0 }),
       helmet: new THREE.MeshStandardMaterial({ color: '#2b2f33', roughness: 0.62, metalness: 0.35 }),
@@ -434,19 +521,30 @@ export function getOperatorMaterials(team) {
 }
 
 /**
- * Team outline material. Renders behind geometry (depthTest false) so the
- * silhouette shows through the environment, which is what makes enemies
- * findable on a busy map.
+ * Teammate occlusion outline.
+ *
+ * Rewritten after playtest feedback that the old version (a) covered the whole
+ * character in flat colour and (b) showed enemies through walls, which read as
+ * cheating. Now:
+ *   - teammates ONLY, never enemies
+ *   - only drawn where the teammate is BEHIND geometry (depthFunc GreaterDepth),
+ *     so a visible teammate shows no outline at all
+ *   - an inverted hull scaled slightly past the body, so it reads as a rim
+ *     around the silhouette rather than a fill over it
  */
 export function getOutlineMaterial(team) {
   return make(`outline-${team}`, () => new THREE.MeshBasicMaterial({
-    color: team === 'BLUE' ? '#3fa9ff' : '#ff3b2f',
+    color: team === 'BLUE' ? '#63b8ff' : '#ff7a5c',
     side: THREE.BackSide,
     transparent: true,
-    opacity: 0.55,
-    depthTest: false,
+    opacity: 0.85,
+    // Draw ONLY the occluded part: this is what turns a fill into a
+    // see-through-walls rim without revealing anyone in the open.
+    depthTest: true,
+    depthFunc: THREE.GreaterDepth,
     depthWrite: false,
     toneMapped: false,
+    fog: false,
   }));
 }
 

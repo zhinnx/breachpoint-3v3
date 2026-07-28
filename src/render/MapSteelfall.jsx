@@ -16,9 +16,54 @@ import { getMapMaterials } from './materials.js';
 const box = new THREE.BoxGeometry(1, 1, 1);
 const dummy = new THREE.Object3D();
 
+/**
+ * Box geometry with world-scale UVs baked per face.
+ *
+ * FIXES TEXTURE STRETCHING: the layer draws one unit cube scaled to each
+ * brush, so a 20m wall stretched a single texture tile across 20 metres while
+ * a 1m crate got the same tile at full density. Nothing matched, and large
+ * surfaces looked smeared.
+ *
+ * Each brush now gets its UVs rewritten from its real dimensions, so texel
+ * density is constant everywhere: one tile per TILE_M metres on every face,
+ * regardless of how big the brush is.
+ */
+const TILE_M = 2.4;
+
+function makeBrushGeometry(list) {
+  const src = new THREE.BoxGeometry(1, 1, 1);
+  const geo = src.clone();
+  src.dispose();
+  const uv = geo.attributes.uv;
+  // Per-face axis pairs on a BoxGeometry: +X,-X use (z,y); +Y,-Y use (x,z);
+  // +Z,-Z use (x,y). Four verts per face, six faces.
+  geo.userData.faceAxis = [
+    [2, 1], [2, 1], [0, 2], [0, 2], [0, 1], [0, 1],
+  ];
+  geo.setAttribute('uv', uv);
+  return geo;
+}
+
 /** One InstancedMesh per material bucket. */
 function BrushLayer({ mat, list, material }) {
   const ref = useRef();
+
+  // Instanced UV scale/offset so every brush tiles at a constant texel density.
+  const uvData = useMemo(() => {
+    const arr = new Float32Array(list.length * 2);
+    for (let i = 0; i < list.length; i++) {
+      const b = list[i];
+      // Use the two largest dimensions: that is the face a player mostly sees.
+      const sx = Math.max(0.25, (b.h[0] * 2) / TILE_M);
+      const sy = Math.max(0.25, (b.h[1] * 2) / TILE_M);
+      const sz = Math.max(0.25, (b.h[2] * 2) / TILE_M);
+      const dims = [sx, sy, sz].sort((p, q) => q - p);
+      arr[i * 2] = dims[0];
+      arr[i * 2 + 1] = dims[1];
+    }
+    return arr;
+  }, [list]);
+
   useLayoutEffect(() => {
     const mesh = ref.current;
     if (!mesh) return;
@@ -31,6 +76,12 @@ function BrushLayer({ mat, list, material }) {
       mesh.setMatrixAt(i, dummy.matrix);
     }
     mesh.instanceMatrix.needsUpdate = true;
+
+    // Feed per-instance UV scale to the shader.
+    mesh.geometry.setAttribute(
+      'uvScale',
+      new THREE.InstancedBufferAttribute(uvData, 2),
+    );
 
     // IMPORTANT: computeBoundingSphere() on an InstancedMesh only measures the
     // *source* geometry (a unit cube => r≈0.87 at the origin). Three.js would

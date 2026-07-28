@@ -15,7 +15,10 @@ import Effects from './Effects.jsx';
 import Projectiles from './Grenades.jsx';
 import ViewModel from './ViewModel.jsx';
 import PlayerCamera from './PlayerCamera.jsx';
-import { getEnvMap } from './materials.js';
+import { getEnvMap, setTextureTier } from './materials.js';
+import { hasLineOfSight } from '../game/raycast.js';
+import { getTier, DynamicResolution } from './quality.js';
+import PostFX from './PostFX.jsx';
 
 /** Drives the fixed-step simulation from the render loop. */
 function SimulationDriver({ sim }) {
@@ -30,6 +33,7 @@ function Actors() {
   const order = useGame((s) => s.order);
   const entities = useGame((s) => s.entities);
   const playerId = useGame((s) => s.playerId);
+  const playerTeam = useGame((s) => s.entities[s.playerId]?.team);
 
   return (
     <group>
@@ -38,7 +42,16 @@ function Actors() {
         const entity = entities[id];
         const actor = world.actors[id];
         if (!entity || !actor) return null;
-        return <Operator key={id} actor={actor} entity={entity} />;
+        // Only teammates get an occlusion rim. Enemies must be found by
+        // looking, not by seeing them through walls.
+        return (
+          <Operator
+            key={id}
+            actor={actor}
+            entity={entity}
+            isFriendly={entity.team === playerTeam}
+          />
+        );
       })}
     </group>
   );
@@ -61,19 +74,59 @@ function LocalBody() {
   );
 }
 
-function EnvSetup() {
+function EnvSetup({ quality }) {
   const { gl, scene } = useThree();
+  const tier = getTier(quality);
+  // Texture tier must be set before materials are first built.
+  useMemo(() => setTextureTier(tier), [tier]);
   useEffect(() => {
     gl.toneMapping = THREE.ACESFilmicToneMapping;
     gl.toneMappingExposure = 1.45;
     gl.outputColorSpace = THREE.SRGBColorSpace;
-    gl.shadowMap.enabled = true;
-    gl.shadowMap.type = THREE.PCFSoftShadowMap;
-    const env = getEnvMap(gl);
-    scene.environment = env;
-    // QA hook for headless render inspection.
-    if (typeof window !== 'undefined') window.__BP_GL__ = { gl, scene };
-  }, [gl, scene]);
+
+    // Shadows are a real tier difference: off entirely on low (blob shadows
+    // stand in), PCF at 1024 on medium, soft PCF at 2048 on high.
+    gl.shadowMap.enabled = tier.shadows;
+    gl.shadowMap.type = tier.shadowType === 'pcfsoft'
+      ? THREE.PCFSoftShadowMap
+      : tier.shadowType === 'pcf'
+        ? THREE.PCFShadowMap
+        : THREE.BasicShadowMap;
+    gl.shadowMap.needsUpdate = true;
+
+    // Image-based lighting drives the metal/PBR response. Low tier skips it
+    // so those materials fall back to plain lambert-ish shading.
+    scene.environment = tier.envMap ? getEnvMap(gl, tier.envResolution) : null;
+
+    if (typeof window !== 'undefined') {
+      window.__BP_GL__ = { gl, scene };
+      window.__BP_LOS__ = hasLineOfSight;
+    }
+  }, [gl, scene, tier]);
+  return null;
+}
+
+/**
+ * Runtime resolution scaling (PRD §3.6). Watches median frame time and trims
+ * the internal render resolution rather than letting the frame rate collapse.
+ */
+function DynamicRes({ quality, enabled }) {
+  const { gl, size } = useThree();
+  const tier = getTier(quality);
+  const ctrl = useMemo(() => new DynamicResolution(tier.targetMs), [tier.targetMs]);
+  const last = useRef(performance.now());
+
+  useFrame(() => {
+    if (!enabled) return;
+    const now = performance.now();
+    const dtMs = now - last.current;
+    last.current = now;
+    const next = ctrl.update(dtMs);
+    if (next != null) {
+      const base = Math.min(tier.dpr[1], window.devicePixelRatio || 1);
+      gl.setPixelRatio(Math.max(tier.dpr[0] * 0.8, base * next));
+    }
+  });
   return null;
 }
 
@@ -106,6 +159,7 @@ function BuyZoneBarrier() {
 
 export function Scene({ sim }) {
   const quality = useGame((s) => s.settings.quality);
+  const dynamicRes = useGame((s) => s.settings.dynamicRes !== false);
   const fov = useGame((s) => s.settings.fov);
   const playerId = useGame((s) => s.playerId);
   const entity = useGame((s) => s.entities[s.playerId]);
@@ -113,10 +167,12 @@ export function Scene({ sim }) {
 
   return (
     <Canvas
-      shadows
-      dpr={quality === 'high' ? [1, 1.8] : quality === 'medium' ? [1, 1.35] : [0.75, 1]}
+      shadows={getTier(quality).shadows
+        ? (getTier(quality).shadowType === 'pcfsoft' ? 'soft' : 'basic')
+        : false}
+      dpr={getTier(quality).dpr}
       gl={{
-        antialias: quality !== 'low',
+        antialias: getTier(quality).antialias,
         powerPreference: 'high-performance',
         stencil: false,
         depth: true,
@@ -124,17 +180,20 @@ export function Scene({ sim }) {
       camera={{ fov, near: 0.06, far: 220, position: [0, 1.7, -26] }}
       frameloop="always"
     >
-      <EnvSetup />
+      <EnvSetup quality={quality} />
+      <DynamicRes quality={quality} enabled={dynamicRes} />
       <SimulationDriver sim={sim} />
       <Physics gravity={[0, -22.5, 0]} timeStep="vary" paused={false}>
         <MapSteelfall quality={quality} />
       </Physics>
+      {/* After the map so the occlusion rim tests against world depth. */}
       <Actors />
       <LocalBody />
       <Effects />
       <Projectiles />
       <BuyZoneBarrier />
       {actor && entity && <PlayerCamera actor={actor} entity={entity} />}
+      <PostFX quality={quality} />
       {actor && entity && entity.alive && <ViewModel actor={actor} entity={entity} />}
     </Canvas>
   );

@@ -170,11 +170,13 @@ Swapping in real `.glb` assets later is a drop-in change behind the same compone
 ## Tests
 
 ```bash
-node tests/run.mjs         # headless full-match simulation (logic, no renderer)
-node tests/browser.mjs     # real production build in headless Chrome
-node tests/contrast.mjs    # WCAG contrast for every token pair
-node tests/responsive.mjs  # 7 device profiles, touch input, collision gate
-node tests/shots-ui.mjs    # capture UI screenshots
+node tests/run.mjs            # headless full-match simulation (logic, no renderer)
+node tests/playtest-fixes.mjs # regression gate for reported playtest bugs
+node tests/browser.mjs        # real production build in headless Chrome
+node tests/roundflow.mjs      # round lifecycle: death, respawn, rebuy
+node tests/contrast.mjs       # WCAG contrast for every token pair
+node tests/responsive.mjs     # 7 device profiles, touch input, collision gate
+node tests/shots-ui.mjs       # capture UI screenshots
 ```
 
 `tests/responsive.mjs` emulates real devices with touch enabled and asserts the
@@ -211,7 +213,29 @@ width from 320 to 1920.
    strong; both reduced and damped further while aiming.
 11. **Fire button could not aim** — the mobile fire control is now a drag
    surface: hold to shoot, slide the same thumb to steer.
-12. **Bots hit ~97% of shots** — the aim vector was blended too strongly toward the exact hitbox, making `aimError` irrelevant. Added a per-shot error cone scaled by range/movement/spray; accuracy now lands in a human 10–46% band.
+12. **Round 2+ started mid-map and needed a manual READY** — `respawnActor()`
+   read `entity.pos`, but `syncTransforms()` writes live positions into the
+   entity every frame, so by round end the "spawn" was wherever the actor had
+   been standing. Spawn slots are now recomputed from map data on reset.
+13. **Teammate/enemy outlines looked like cheating** — the old shell was drawn
+   with `depthTest: false` over every operator, so it covered characters in
+   flat colour and revealed enemies through walls. It is now teammates only,
+   uses `depthFunc: GreaterDepth` so it appears *only* where a teammate is
+   occluded, and renders before the body so it reads as a rim.
+14. **Joystick died after opening a modal** — the release effect cleared
+   `fireId` but not `stickId`/`lookId`, so the stale pointer id permanently
+   failed the `!== null` guard. All captured pointers are now released, with
+   `pointercancel`/`blur`/`visibilitychange` guards.
+15. **Settings were lost on reload** — now persisted to `localStorage`, merged
+   over defaults so a newly added setting never reads `undefined`.
+16. **Medium and high graphics looked identical** — they differed only in
+   shadow-map size. Tiers now change shadows (off / PCF 1024 / PCFSoft 2048),
+   environment lighting, post-processing (none / bloom+grade / +SSAO),
+   texture resolution and anisotropy. See `src/render/quality.js`.
+17. **Textures stretched on large surfaces** — the map draws instanced unit
+   cubes scaled per brush, so one texture tile spanned a whole 20m wall. A
+   per-instance `uvScale` attribute now keeps texel density constant.
+18. **Bots hit ~97% of shots** — the aim vector was blended too strongly toward the exact hitbox, making `aimError` irrelevant. Added a per-shot error cone scaled by range/movement/spray; accuracy now lands in a human 10–46% band.
 
 ---
 

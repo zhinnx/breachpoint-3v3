@@ -21,31 +21,38 @@ const B = ({ p, s, r, m, ...rest }) => (
 
 /** Full third-person operator. Animated by the actor runtime. */
 /**
- * Team outline. An inverted-hull shell drawn with BackSide + depthTest off, so
- * an operator reads through cover-adjacent gloom and at distance. Enemies get
- * red, friendlies blue. Without this, players reported simply not being able
- * to see anyone.
+ * Teammate occlusion rim.
+ *
+ * Thin inverted hull that is only visible where the teammate is hidden behind
+ * geometry. Enemies never get one: seeing hostiles through walls is exactly the
+ * "player feels like a cheater" problem this replaces.
  */
-function OutlineShell({ team, height, crouch }) {
+function OutlineShell({ team, crouch }) {
   const mat = getOutlineMaterial(team);
   const scaleY = 1 - crouch * 0.28;
+  // Kept just a few percent larger than the body so it reads as an edge, not a
+  // slab of colour sitting on top of the character.
+  const K = 1.045;
+  // renderOrder -1: the rim must be drawn BEFORE the body writes depth.
+  // Drawing it after (renderOrder 3) meant GreaterDepth passed against the
+  // character's own depth and painted a solid slab over the whole model,
+  // which is what made teammates look like flat blue cutouts.
   return (
-    <group renderOrder={2}>
-      {/* torso + head block, slightly inflated */}
-      <mesh position={[0, 0.86 + 0.2 * scaleY, 0]} material={mat} scale={[1.14, scaleY * 1.06, 1.16]}>
-        <boxGeometry args={[0.42, 0.5, 0.28]} />
+    <group renderOrder={-1}>
+      <mesh position={[0, 0.86 + 0.2 * scaleY, 0]} material={mat} scale={[K, scaleY * K, K]}>
+        <boxGeometry args={[0.4, 0.48, 0.26]} />
       </mesh>
-      <mesh position={[0, 1.52 * scaleY, 0]} material={mat} scale={[1.16, 1.1, 1.16]}>
-        <boxGeometry args={[0.22, 0.25, 0.23]} />
+      <mesh position={[0, 1.52 * scaleY, 0]} material={mat} scale={[K, K, K]}>
+        <boxGeometry args={[0.21, 0.24, 0.22]} />
       </mesh>
-      <mesh position={[0, 0.45 * scaleY, 0]} material={mat} scale={[1.1, scaleY, 1.12]}>
-        <boxGeometry args={[0.4, 0.62, 0.24]} />
+      <mesh position={[0, 0.45 * scaleY, 0]} material={mat} scale={[K, scaleY, K]}>
+        <boxGeometry args={[0.38, 0.6, 0.23]} />
       </mesh>
     </group>
   );
 }
 
-export function Operator({ actor, entity, isEnemy }) {
+export function Operator({ actor, entity, isFriendly = false }) {
   const group = useRef();
   const hips = useRef();
   const torso = useRef();
@@ -114,8 +121,8 @@ export function Operator({ actor, entity, isEnemy }) {
 
   return (
     <group ref={group}>
-      {actor?.alive && (
-        <OutlineShell team={entity.team} height={1.8} crouch={actor.crouch || 0} />
+      {actor?.alive && isFriendly && (
+        <OutlineShell team={entity.team} crouch={actor.crouch || 0} />
       )}
       <group ref={hips} position={[0, 0, 0]}>
         {/* ---------- legs: cargo trousers + boots ---------- */}

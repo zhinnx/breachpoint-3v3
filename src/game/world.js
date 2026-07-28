@@ -168,11 +168,21 @@ export function currentWeaponRuntime(actor) {
 }
 
 /** Reset positions/ammo at round start. */
-export function respawnActor(actor, entity) {
-  actor.pos = [...entity.pos];
-  actor.prevPos = [...entity.pos];
+/**
+ * Reset an actor for a new round.
+ *
+ * `spawn` MUST be passed by the caller. Reading `entity.pos` here was a bug:
+ * syncTransforms() writes live positions back into the entity every frame, so
+ * by the time a round ends `entity.pos` is wherever the actor was standing,
+ * not its spawn. Rounds after the first therefore started everyone mid-map.
+ */
+export function respawnActor(actor, entity, spawn) {
+  const at = spawn ? [spawn.pos[0], spawn.pos[1], spawn.pos[2]] : [...entity.pos];
+  const yaw = spawn ? (spawn.yaw || 0) : (entity.yaw || 0);
+  actor.pos = [...at];
+  actor.prevPos = [...at];
   actor.vel = [0, 0, 0];
-  actor.yaw = entity.yaw || 0;
+  actor.yaw = yaw;
   actor.desiredYaw = actor.yaw;
   actor.pitch = 0;
   actor.desiredPitch = 0;

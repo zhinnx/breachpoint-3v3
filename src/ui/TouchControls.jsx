@@ -316,18 +316,56 @@ export function TouchControls({ sim }) {
   useEffect(() => { sim.input.sprint = sprint; }, [sprint, sim]);
   useEffect(() => { sim.input.crouch = crouch; }, [crouch, sim]);
 
-  // Release everything when control is taken away.
+  /**
+   * Release everything when control is taken away.
+   *
+   * BUG THIS FIXES: opening the shop or settings mid-drag unmounted the touch
+   * layer while `stickId`/`lookId` still held a pointerId. Those ids were never
+   * cleared, so on return every new touch was rejected by the
+   * `if (stickId.current !== null) return` guard and the joystick was dead for
+   * the rest of the match. Every captured pointer must be dropped here.
+   */
   useEffect(() => {
     if (canAct && alive && !paused && !buyOpen) return;
     sim.input.fire = false;
     sim.input.forward = 0;
     sim.input.right = 0;
     sim.input.jump = false;
+    stickId.current = null;
+    lookId.current = null;
     fireId.current = null;
+    setStickOn(false);
     setFiring(false);
     setSprint(false);
     setAds(false);
+    if (knobEl.current) knobEl.current.style.transform = 'translate(0px, 0px)';
   }, [canAct, alive, paused, buyOpen, sim]);
+
+  // Same reset when the control surface itself unmounts, and a global
+  // pointercancel guard for the browser yanking capture away (scroll, alt-tab,
+  // incoming call). Without this a lost pointerup strands the stick again.
+  useEffect(() => {
+    const release = () => {
+      stickId.current = null;
+      lookId.current = null;
+      fireId.current = null;
+      sim.input.forward = 0;
+      sim.input.right = 0;
+      sim.input.fire = false;
+      setStickOn(false);
+      setFiring(false);
+      if (knobEl.current) knobEl.current.style.transform = 'translate(0px, 0px)';
+    };
+    window.addEventListener('pointercancel', release);
+    window.addEventListener('blur', release);
+    document.addEventListener('visibilitychange', release);
+    return () => {
+      window.removeEventListener('pointercancel', release);
+      window.removeEventListener('blur', release);
+      document.removeEventListener('visibilitychange', release);
+      release();
+    };
+  }, [sim]);
 
   const hidden = paused || buyOpen;
   const util = entity?.loadout?.utility || {};

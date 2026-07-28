@@ -16,6 +16,47 @@ import { SPAWNS, inBuyZone, setActiveMap } from './steelfall.js';
 let _uid = 1;
 const uid = () => `e${_uid++}`;
 
+// ---------------------------------------------------------------- persistence
+const SETTINGS_KEY = 'bp.settings.v1';
+const PROFILE_KEY = 'bp.profile.v1';
+
+const DEFAULT_SETTINGS = {
+  sensitivity: 1.0,
+  fov: 82,
+  masterVolume: 0.8,
+  sfxVolume: 1.0,
+  musicVolume: 0.5,
+  invertY: false,
+  showFps: false,
+  quality: 'high',
+  crosshairColor: '#39ff88',
+  adsToggle: false,
+  aimAssist: true,
+  dynamicRes: true,
+};
+
+/** Merge stored values over defaults so a new setting never reads undefined. */
+function loadJSON(key, fallback) {
+  if (typeof localStorage === 'undefined') return fallback;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? { ...fallback, ...parsed } : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function saveJSON(key, value) {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Private mode or quota exceeded: settings simply stay session-only.
+  }
+}
+
 const BOT_NAMES = {
   BLUE: ['VIPER', 'ECHO', 'KESTREL', 'ORACLE', 'MASON'],
   RED: ['HAVOC', 'RAVEN', 'CINDER', 'TALON', 'DRIFT'],
@@ -90,19 +131,8 @@ export const useGame = create((set, get) => ({
   practice: false,
   paused: false,
   pointerLocked: false,
-  settings: {
-    sensitivity: 1.0,
-    fov: 82,
-    masterVolume: 0.8,
-    sfxVolume: 1.0,
-    musicVolume: 0.5,
-    invertY: false,
-    showFps: false,
-    quality: 'high',
-    crosshairColor: '#39ff88',
-    adsToggle: false,
-  },
-  profile: { name: 'OPERATOR', level: 1, xp: 0, lifetime: initialStats() },
+  settings: loadJSON(SETTINGS_KEY, DEFAULT_SETTINGS),
+  profile: loadJSON(PROFILE_KEY, { name: 'OPERATOR', level: 1, xp: 0, lifetime: initialStats() }),
 
   // ---------------------------------------------------------------- match
   phase: PHASE.WARMUP,
@@ -131,7 +161,16 @@ export const useGame = create((set, get) => ({
 
   // ---------------------------------------------------------------- lifecycle
   setScreen: (screen) => set({ screen }),
-  setSetting: (k, v) => set((s) => ({ settings: { ...s.settings, [k]: v } })),
+  setSetting: (k, v) => set((s) => {
+    const settings = { ...s.settings, [k]: v };
+    saveJSON(SETTINGS_KEY, settings);
+    return { settings };
+  }),
+
+  resetSettings: () => {
+    saveJSON(SETTINGS_KEY, DEFAULT_SETTINGS);
+    return set({ settings: { ...DEFAULT_SETTINGS } });
+  },
   setPointerLocked: (v) => set({ pointerLocked: v }),
   setPaused: (v) => set({ paused: v }),
   setLoadingProgress: (v) => set({ loadingProgress: v }),
@@ -478,11 +517,13 @@ export const useGame = create((set, get) => ({
       for (const k of Object.keys(lifetime)) lifetime[k] += p.stats[k] || 0;
     }
     const xp = s.profile.xp + (p ? p.stats.kills * 25 + (s.matchWinner === s.playerTeam ? 200 : 80) : 0);
+    const profile = { ...s.profile, xp, level: 1 + Math.floor(xp / 1000), lifetime };
+    saveJSON(PROFILE_KEY, profile);
     set({
       phase: PHASE.MATCH_END,
       screen: 'summary',
       mvpId: best,
-      profile: { ...s.profile, xp, level: 1 + Math.floor(xp / 1000), lifetime },
+      profile,
     });
     get().pushEvent({
       type: 'sfx',

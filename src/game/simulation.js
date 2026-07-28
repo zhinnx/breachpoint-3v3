@@ -5,7 +5,8 @@
  * projectiles -> transient VFX -> store sync. Rendering just reads the result.
  * This is the seam where an authoritative server would slot in later.
  */
-import { PHASE, TIMERS, MOVE, TEAM } from './config.js';
+import { PHASE, TIMERS, MOVE, TEAM, MATCH } from './config.js';
+import { SPAWNS } from './steelfall.js';
 import { getWeapon, FIRE_MODE } from './weapons.js';
 import {
   world, resetWorldActors, respawnActor, syncActorFromEntity, currentWeaponRuntime,
@@ -66,11 +67,18 @@ export class Simulation {
   onRoundReset() {
     const s = this.store;
     resetBlackboard();
+    // Spawn slots are recomputed here rather than read from entity.pos, which
+    // holds the last live position (see respawnActor).
+    const swapped = s.round > MATCH.sideSwapAfterRound;
+    const perTeam = { BLUE: 0, RED: 0 };
     for (const id of s.order) {
       const e = s.entities[id];
       const a = world.actors[id];
       if (!a) continue;
-      respawnActor(a, e);
+      const spawnTeam = swapped ? (e.team === TEAM.BLUE ? TEAM.RED : TEAM.BLUE) : e.team;
+      const slot = SPAWNS[spawnTeam][perTeam[e.team] % MATCH.teamSize];
+      perTeam[e.team] += 1;
+      respawnActor(a, e, slot);
       if (a.ai) {
         a.ai.state = 'HOLD';
         a.ai.target = null;
