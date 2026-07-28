@@ -7,4 +7,6 @@ dist-ssr
 dev-dist
 
 # test artifacts
-tests/*.png
+tests/ui-*.png
+!tests/ui-hud-phone-land.png
+!tests/ui-lobby-desktop.png

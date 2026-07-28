@@ -14,16 +14,19 @@ import BuyMenu from './ui/BuyMenu.jsx';
 import Lobby from './ui/Lobby.jsx';
 import { Scoreboard, PauseMenu, PostMatch } from './ui/Overlays.jsx';
 import { useInput, requestPointerLock } from './ui/useInput.js';
+import TouchControls from './ui/TouchControls.jsx';
+import { useDevice } from './ui/useDevice.js';
 import * as Audio from './game/audio.js';
 
 function LoadingScreen({ progress, detail }) {
   return (
-    <div className="loading">
-      <div className="ld-logo">BREACH<span>POINT</span></div>
-      <div className="ld-bar"><i style={{ width: `${progress}%` }} /></div>
-      <div className="ld-detail">{detail}</div>
-      <div className="ld-tips">
-        <b>TIP</b> Crouching tightens your spread. Jump-shooting wrecks it.
+    <div className="boot">
+      <div className="boot-mark">BREACH<span>POINT</span></div>
+      <div className="boot-sub">TACTICAL 3V3</div>
+      <div className="boot-bar hazard"><i style={{ width: `${progress}%` }} /></div>
+      <div className="boot-detail">{detail}</div>
+      <div className="boot-tip">
+        <b>FIELD NOTE</b> Crouching tightens your spread. Firing mid-air wrecks it.
       </div>
     </div>
   );
@@ -37,9 +40,15 @@ export default function App() {
   const pointerLocked = useGame((s) => s.pointerLocked);
   const settings = useGame((s) => s.settings);
   const playerId = useGame((s) => s.playerId);
+  const dev = useDevice();
 
   const simRef = useRef(null);
-  if (!simRef.current) simRef.current = new Simulation(useGame.getState());
+  if (!simRef.current) {
+    simRef.current = new Simulation(useGame.getState());
+    // In the browser the render loop can stall (tab throttling, slow GPU), so
+    // let wall time act as a floor on the round clock.
+    simRef.current.useWallClock = true;
+  }
   const sim = simRef.current;
 
   const containerRef = useRef();
@@ -148,6 +157,9 @@ export default function App() {
   const onCanvasClick = () => {
     const s = useGame.getState();
     if (s.screen !== 'match' || s.paused || s.buyMenuOpen) return;
+    // Touch devices drive the camera through TouchControls; pointer lock is
+    // meaningless there and on iOS the request throws.
+    if (dev.touch) { Audio.resumeAudio(); return; }
     if (!document.pointerLockElement) {
       Audio.resumeAudio();
       requestPointerLock(containerRef.current);
@@ -166,12 +178,13 @@ export default function App() {
           <HUD />
           <BuyMenu />
           <Scoreboard />
-          <PauseMenu onResume={() => requestPointerLock(containerRef.current)} />
-          {!pointerLocked && !paused && !buyMenuOpen && (
-            <div className="click-to-play">
-              <div className="ctp-card">
-                <div className="ctp-title">CLICK TO ENGAGE</div>
-                <div className="ctp-sub">Mouse look will be captured · [Esc] to release</div>
+          <PauseMenu onResume={() => { if (!dev.touch) requestPointerLock(containerRef.current); }} />
+          {dev.touch && <TouchControls sim={sim} />}
+          {!dev.touch && !pointerLocked && !paused && !buyMenuOpen && (
+            <div className="engage">
+              <div className="engage-card brk brk-lg">
+                <div className="engage-t">CLICK TO ENGAGE</div>
+                <div className="engage-s">MOUSE LOOK CAPTURED · ESC TO RELEASE</div>
               </div>
             </div>
           )}

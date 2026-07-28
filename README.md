@@ -23,6 +23,8 @@ Deploy to Vercel: the repo ships `vercel.json` (framework `vite`, output `dist`)
 
 ## Controls
 
+**Desktop**
+
 | Input | Action |
 |---|---|
 | `W A S D` | Move |
@@ -35,11 +37,23 @@ Deploy to Vercel: the repo ships `vercel.json` (framework `vite`, output `dist`)
 | `1` / `2` | Primary / sidearm |
 | `3` `4` `5` | Frag / Flash / Smoke |
 | `F` | Medkit |
-| `B` | Buy menu |
+| `B` | Armory |
 | `Tab` | Scoreboard |
 | `Esc` | Pause |
 
----
+**Mobile** — full touch control surface, no keyboard needed:
+
+| Zone | Action |
+|---|---|
+| Left thumb | Virtual stick, tracked 1:1 from wherever the thumb lands |
+| Right thumb | Free look, drag anywhere in the open right area |
+| Right cluster | Fire · aim · jump · crouch · reload · weapon swap |
+| Left edge | Sprint toggle |
+| Utility rail | Frag · flash · smoke · medkit, with live counts |
+| Top right | Armory · scoreboard · pause |
+
+Layout switches on **pointer capability**, not width, so a narrow desktop window
+keeps mouse-and-keyboard controls and a large tablet still gets touch.
 
 ## Match rules (PRD §1–§5)
 
@@ -108,6 +122,13 @@ src/
 └── App.jsx               Screen routing + boot sequence
 ```
 
+**Design system:** see `DESIGN.md`. Tactical Industrial HUD — charcoal ground,
+gunmetal panels, one hazard-amber accent held to ~3% of the viewport, chamfered
+`clip-path` geometry (never `border-radius`), 1px bevels (never blurred drop
+shadows), segmented meters, and a corner-bracket framing system as the
+signature element. Three self-hosted type roles: Big Shoulders Display for
+headers, Rajdhani for HUD numerals, IBM Plex Sans for body.
+
 **Tech:** React 18 · Three.js · @react-three/fiber · @react-three/drei · @react-three/rapier (WASM physics) · zustand · three-pathfinding · Vite · vite-plugin-pwa.
 
 ### Bot AI (PRD §8)
@@ -129,10 +150,18 @@ Swapping in real `.glb` assets later is a drop-in change behind the same compone
 ## Tests
 
 ```bash
-node tests/run.mjs        # headless full-match simulation (logic, no renderer)
-node tests/browser.mjs    # real production build in headless Chrome
-node tests/shots.mjs      # capture gameplay screenshots
+node tests/run.mjs         # headless full-match simulation (logic, no renderer)
+node tests/browser.mjs     # real production build in headless Chrome
+node tests/contrast.mjs    # WCAG contrast for every token pair
+node tests/responsive.mjs  # 7 device profiles, touch input, collision gate
+node tests/shots-ui.mjs    # capture UI screenshots
 ```
+
+`tests/responsive.mjs` emulates real devices with touch enabled and asserts the
+things that decide whether a phone can actually play: touch controls mount,
+every target clears 44px, the stick/fire/look inputs genuinely reach the
+simulation, no HUD readout sits under a control, and no horizontal scroll at any
+width from 320 to 1920.
 
 `tests/run.mjs` plays a complete 7-round match with no renderer and asserts navigation, raycasting, economy, kills, round flow and MVP selection. `tests/browser.mjs` drives the real build — lobby → buy a weapon through the UI → combat → scoreboard → pause → lobby — and fails on any console error.
 
@@ -143,7 +172,14 @@ node tests/shots.mjs      # capture gameplay screenshots
 3. **Black screen** — registering a `useFrame` with `priority > 0` makes R3F stop rendering the main scene automatically; the manual pass drew only the viewmodel. Fixed by rendering both scenes in the priority pass.
 4. **Whole map frustum-culled** — `computeBoundingSphere()` on an `InstancedMesh` measures only the source geometry (a unit cube), so the foundry vanished whenever the camera looked away from the origin. Fixed by deriving real bounds from instance AABBs.
 5. **Frame-rate-dependent round clock** — the phase timer used render delta, so a slow GPU stalled the match. Now driven by wall time.
-6. **Bots hit ~97% of shots** — the aim vector was blended too strongly toward the exact hitbox, making `aimError` irrelevant. Added a per-shot error cone scaled by range/movement/spray; accuracy now lands in a human 10–46% band.
+6. **Mobile was unplayable** — the game loaded on phones but shipped with zero
+   touch handlers and a single breakpoint, so there was no way to move, aim or
+   shoot. Added a full touch control surface plus per-orientation layouts.
+7. **Three contrast failures** caught by computing WCAG ratios rather than
+   eyeballing them: team red on panel (2.96 vs 3.0 required) and both
+   team-colour text ramps. Fixed by splitting each team colour into a dark
+   fill ramp and a lighter text ramp.
+8. **Bots hit ~97% of shots** — the aim vector was blended too strongly toward the exact hitbox, making `aimError` irrelevant. Added a per-shot error cone scaled by range/movement/spray; accuracy now lands in a human 10–46% band.
 
 ---
 

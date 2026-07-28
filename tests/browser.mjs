@@ -76,15 +76,15 @@ check('lobby canvas + WebGL context', webglInfo.canvas && webglInfo.gl,
 const playBtn = await page.$('.play-btn');
 check('PLAY button present', !!playBtn);
 
-const modeCards = await page.$$eval('.mode-card', (n) => n.length);
+const modeCards = await page.$$eval('.mode-tab', (n) => n.length);
 check('mode cards rendered', modeCards === 3, `${modeCards} modes`);
 
 // open locker (weapon showcase / 3D preview)
-await page.click('.icon-btn[title="Locker"]').catch(() => {});
+await page.click('.icon-btn[aria-label="Locker"]').catch(() => {});
 await new Promise((r) => setTimeout(r, 1400));
-const lockerItems = await page.$$eval('.locker-item', (n) => n.length).catch(() => 0);
+const lockerItems = await page.$$eval('.lk-item', (n) => n.length).catch(() => 0);
 check('locker lists all weapons', lockerItems === 8, `${lockerItems} entries`);
-await page.click('.locker .close-btn').catch(() => {});
+await page.click('.sheet .close-btn').catch(() => {});
 await new Promise((r) => setTimeout(r, 400));
 
 // ---- start a match
@@ -97,41 +97,46 @@ check('HUD mounted after PLAY', inMatch);
 // The phase clock is driven by the render loop, and under SwiftShader the WebGL
 // context can take several seconds to come up, so wait for the buy phase rather
 // than assuming a fixed delay.
-await page.waitForSelector('.buymenu', { timeout: 40000 }).catch(() => {});
+await page.waitForSelector('.buy', { timeout: 40000 }).catch(() => {});
 
 const hudBits = await page.evaluate(() => ({
-  topbar: !!document.querySelector('.topbar'),
+  topbar: !!document.querySelector('.hud-top'),
   minimap: !!document.querySelector('.minimap canvas'),
   vitals: !!document.querySelector('.vitals'),
-  ammo: !!document.querySelector('.ammo-panel'),
-  buymenu: !!document.querySelector('.buymenu'),
-  team: !!document.querySelector('.team-status'),
+  ammo: !!document.querySelector('.ammo'),
+  buymenu: !!document.querySelector('.buy'),
+  squad: !!document.querySelector('.squad'),
 }));
 check('top bar + score dots', hudBits.topbar);
 check('minimap canvas', hudBits.minimap);
 check('vitals (HP/armor)', hudBits.vitals);
 check('ammo panel', hudBits.ammo);
-check('buy menu auto-opened', hudBits.buymenu);
-check('team status strip', hudBits.team);
+check('armory opens in buy phase', hudBits.buymenu);
+check('squad strip', hudBits.squad);
 
 // buy a rifle through the real UI
 const bought = await page.evaluate(() => {
-  const items = [...document.querySelectorAll('.bm-item')];
+  const items = [...document.querySelectorAll('.rack-item')];
   const target = items.find((el) => el.textContent.includes('Vanguard-7'));
   if (!target) return 'no item';
   target.click();
   return 'clicked';
 });
 await new Promise((r) => setTimeout(r, 700));
-const loadoutTxt = await page.$eval('.bm-loadout', (el) => el.textContent).catch(() => '');
+const loadoutTxt = await page.$eval('.buy-loadout', (el) => el.textContent).catch(() => '');
 check('purchased Vanguard-7 via UI', loadoutTxt.includes('Vanguard-7'), loadoutTxt.trim().slice(0, 60));
 
-// close buy menu, let combat begin
+// Close the armory so the combat HUD is unobstructed.
 await page.keyboard.press('KeyB');
+await page.evaluate(() => window.__BP_STORE__?.getState().toggleBuyMenu(false));
 await new Promise((r) => setTimeout(r, 500));
 
 // Let the buy phase run out into combat. Speed this up by waiting real time.
 console.log('  … waiting for combat phase (buy timer)');
+await page.evaluate(() => {
+  const st = window.__BP_STORE__?.getState();
+  if (st && st.phase === 'BUY') st.beginCombat();
+});
 const gotCombat = await page.waitForFunction(
   () => document.querySelector('.crosshair') !== null,
   { timeout: 45000, polling: 500 },
@@ -143,7 +148,7 @@ await new Promise((r) => setTimeout(r, 9000));
 
 const midMatch = await page.evaluate(() => {
   const mag = document.querySelector('.mag');
-  const hp = document.querySelector('.v-num');
+  const hp = document.querySelector('.hp-num');
   const timer = document.querySelector('.timer');
   return {
     mag: mag ? mag.textContent : null,
@@ -159,7 +164,7 @@ check('round timer counting', midMatch.timer !== null, `t=${midMatch.timer}`);
 // scoreboard
 await page.keyboard.down('Tab');
 await new Promise((r) => setTimeout(r, 600));
-const sbRows = await page.$$eval('.stats-table tbody tr', (n) => n.length).catch(() => 0);
+const sbRows = await page.$$eval('.tbl tbody tr', (n) => n.length).catch(() => 0);
 await page.keyboard.up('Tab');
 check('scoreboard shows 6 operators', sbRows === 6, `${sbRows} rows`);
 
@@ -183,14 +188,14 @@ check('render loop advancing', fps >= 1, `${fps} fps (SwiftShader CPU raster; no
 // pause menu
 await page.keyboard.press('Escape');
 await new Promise((r) => setTimeout(r, 600));
-const paused = await page.evaluate(() => !!document.querySelector('.pause-menu'));
+const paused = await page.evaluate(() => !!document.querySelector('.pause'));
 check('pause menu opens', paused);
 
 await page.screenshot({ path: 'tests/shot-match.png' });
 
 // back to lobby
 await page.evaluate(() => {
-  const b = [...document.querySelectorAll('.pm-secondary')].find((x) => x.textContent.includes('ABANDON'));
+  const b = [...document.querySelectorAll('.pause-acts .btn-ghost')].find((x) => x.textContent.includes('ABANDON'));
   if (b) b.click();
 });
 await new Promise((r) => setTimeout(r, 1500));

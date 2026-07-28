@@ -35,6 +35,8 @@ export class Simulation {
     };
     this.mouseDelta = [0, 0];
     this.initialized = false;
+    // Browsers opt in; headless simulation drives the clock from its own dt.
+    this.useWallClock = false;
     this.syncAccum = 0;
     this.hurtFlash = 0;
     this.prevHp = 100;
@@ -109,14 +111,23 @@ export class Simulation {
 
     if (s.paused) return;
 
-    // Phase timing must not depend on framerate. On very slow devices (or
-    // software rasterizers) raw dt can be huge/erratic, so advance the round
-    // clock from wall time instead of the render delta.
-    const nowMs = performance.now();
-    if (this._lastClock == null) this._lastClock = nowMs;
-    const wallDt = Math.min(0.5, (nowMs - this._lastClock) / 1000);
-    this._lastClock = nowMs;
-    s.tickPhase(wallDt);
+    // Round clock.
+    //
+    // Uses the caller's dt so headless runs (which step far faster than real
+    // time) advance correctly. When `useWallClock` is set — the browser, where
+    // dt comes from rAF — it takes the LARGER of frame dt and elapsed wall
+    // time, so a stalled or throttled render loop cannot freeze the match.
+    // Replacing dt with wall time outright was wrong: it stalls any run whose
+    // simulation is faster than real time.
+    let clockDt = dt;
+    if (this.useWallClock) {
+      const nowMs = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      if (this._lastClock == null) this._lastClock = nowMs;
+      const wallDt = Math.min(0.5, (nowMs - this._lastClock) / 1000);
+      this._lastClock = nowMs;
+      clockDt = Math.max(dt, wallDt);
+    }
+    s.tickPhase(clockDt);
 
     this.accum += Math.min(dt, 0.25);
     let steps = 0;
