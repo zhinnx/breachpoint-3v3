@@ -51,6 +51,9 @@ export default function App() {
   }
   const sim = simRef.current;
 
+  // Aim assist is stronger on touch, so the sim needs to know the input mode.
+  useEffect(() => { sim.isTouch = dev.touch; }, [dev.touch, sim]);
+
   const containerRef = useRef();
   const [booted, setBooted] = useState(false);
   const [bootMsg, setBootMsg] = useState('BAKING NAVMESH…');

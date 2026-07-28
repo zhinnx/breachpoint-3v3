@@ -15,11 +15,15 @@ export const PHASE = {
 };
 
 export const TIMERS = {
-  buy: 30, // PRD §4 — Buy Phase 30s
-  combat: 120, // PRD §4 — Combat Phase 120s
-  suddenDeath: 20, // PRD §4 — tie -> 20s sudden death
-  roundEnd: 7, // PRD §4 — Round End 7s
-  freezeIntro: 1.2, // small camera settle before buy phase opens
+  // Playtest tuning. The PRD numbers (30s buy / 7s round end) meant 37s of
+  // dead time between fights, which reads as the game being stuck. Buy is now
+  // skippable via READY, and round end is trimmed to a beat that still lets
+  // the banner land.
+  buy: 15,
+  combat: 120,
+  suddenDeath: 20,
+  roundEnd: 4,
+  freezeIntro: 0.8,
 };
 
 export const MATCH = {
@@ -69,6 +73,22 @@ export const MOVE = {
   ladderSpeed: 3.2,
 };
 
+/**
+ * Aim assist. Deliberately weak: it nudges, it does not lock. `maxAngleDeg` is
+ * the cone inside which help applies at all, and `pull` is the fraction of the
+ * remaining angle closed per second while the target is inside that cone.
+ * Touch gets more help than mouse because a thumb has far less precision.
+ */
+export const AIM_ASSIST = {
+  enabled: true,
+  mouse: { maxAngleDeg: 3.2, pull: 1.9, maxRange: 55, adsBonus: 1.25 },
+  touch: { maxAngleDeg: 6.0, pull: 4.2, maxRange: 60, adsBonus: 1.35 },
+  // Slow the look while crossing a target so the reticle does not skate past.
+  frictionAngleDeg: 5.5,
+  frictionMouse: 0.72,
+  frictionTouch: 0.55,
+};
+
 // Accuracy penalties (PRD §6 — sprint worse, crouch better, airborne drastically worse)
 export const ACCURACY = {
   baseSpreadDeg: 0.28,
@@ -78,6 +98,21 @@ export const ACCURACY = {
   crouchSpreadMul: 0.55,
   adsSpreadMul: 0.22,
   recoverPerSec: 7.5,
+};
+
+/**
+ * Recoil stance modifiers. Firing from a planted stance is meaningfully more
+ * controllable than firing on the move, and crouching is better still, so
+ * holding an angle is rewarded over running and gunning.
+ */
+export const RECOIL_STANCE = {
+  moving: 1.35,      // walking or strafing
+  sprinting: 1.7,
+  airborne: 2.1,
+  standingStill: 0.82,
+  crouchStill: 0.58, // planted + crouched: the most controllable stance
+  adsBonus: 0.86,    // multiplies on top of the stance value
+  stillSpeed: 0.6,   // below this m/s counts as planted
 };
 
 // PRD §7.3 — Armor
@@ -99,48 +134,69 @@ export const TEAM_COLOR_DIM = {
 };
 
 // ---------------------------------------------------------------- PRD §8 Bot difficulty
+/**
+ * Bot difficulty.
+ *
+ * Retuned after playtest feedback of "enemy AI is auto-aim" and "shots come
+ * from nowhere". Three concrete changes:
+ *   1. viewDistance cut hard. It was 60-75m on a 76m map, so bots effectively
+ *      saw the entire level and could open fire from off-screen.
+ *   2. Longer reaction times, and a separate `targetSwitchDelay` so a bot
+ *      cannot instantly snap onto a second target.
+ *   3. `firstShotDelay` — a beat between acquiring and shooting, which is what
+ *      makes a fight feel readable rather than instant.
+ */
 export const DIFFICULTY = {
   easy: {
     id: 'easy',
     label: 'Easy',
-    reactionTime: [0.55, 0.95],
-    aimError: 3.6, // degrees of cone the bot aims within
-    aimSnap: 4.5, // deg/sec turn-to-target speed factor
-    burstDiscipline: 0.55,
-    grenadeChance: 0.05,
-    hearingRange: 18,
-    viewDistance: 46,
-    preAimSkill: 0.15,
-    strafeSkill: 0.3,
-    headshotBias: 0.05,
+    reactionTime: [0.75, 1.25],
+    firstShotDelay: [0.35, 0.6],
+    targetSwitchDelay: 0.7,
+    aimError: 4.6,
+    aimSnap: 3.4,
+    burstDiscipline: 0.45,
+    grenadeChance: 0.04,
+    hearingRange: 15,
+    viewDistance: 26,
+    preAimSkill: 0.08,
+    strafeSkill: 0.28,
+    headshotBias: 0.02,
+    missBias: 0.5,
   },
   normal: {
     id: 'normal',
     label: 'Normal',
-    reactionTime: [0.3, 0.55],
-    aimError: 1.9,
-    aimSnap: 8,
-    burstDiscipline: 0.75,
-    grenadeChance: 0.22,
-    hearingRange: 26,
-    viewDistance: 60,
-    preAimSkill: 0.45,
-    strafeSkill: 0.6,
-    headshotBias: 0.18,
+    reactionTime: [0.45, 0.8],
+    firstShotDelay: [0.22, 0.4],
+    targetSwitchDelay: 0.5,
+    aimError: 2.9,
+    aimSnap: 5.5,
+    burstDiscipline: 0.62,
+    grenadeChance: 0.16,
+    hearingRange: 20,
+    viewDistance: 34,
+    preAimSkill: 0.3,
+    strafeSkill: 0.55,
+    headshotBias: 0.08,
+    missBias: 0.32,
   },
   hard: {
     id: 'hard',
     label: 'Hard',
-    reactionTime: [0.14, 0.28],
-    aimError: 0.95,
-    aimSnap: 13,
-    burstDiscipline: 0.92,
-    grenadeChance: 0.45,
-    hearingRange: 34,
-    viewDistance: 75,
-    preAimSkill: 0.8,
-    strafeSkill: 0.9,
-    headshotBias: 0.35,
+    reactionTime: [0.26, 0.45],
+    firstShotDelay: [0.12, 0.24],
+    targetSwitchDelay: 0.32,
+    aimError: 1.7,
+    aimSnap: 8.5,
+    burstDiscipline: 0.82,
+    grenadeChance: 0.32,
+    hearingRange: 26,
+    viewDistance: 44,
+    preAimSkill: 0.6,
+    strafeSkill: 0.85,
+    headshotBias: 0.18,
+    missBias: 0.16,
   },
 };
 
@@ -151,7 +207,8 @@ export const GAME_MODES = [
     tag: 'NORMAL',
     difficulty: 'normal',
     blurb: 'Standard tactical match. Bots hold angles, trade, and rotate.',
-    map: 'Steelfall',
+    map: 'Dustline',
+    mapId: 'dustline',
   },
   {
     id: 'hard',
@@ -159,15 +216,17 @@ export const GAME_MODES = [
     tag: 'HARD',
     difficulty: 'hard',
     blurb: 'Near-human reaction times. Bots pre-aim, flank and use utility.',
-    map: 'Steelfall',
+    map: 'Dustline',
+    mapId: 'dustline',
   },
   {
     id: 'practice',
     name: 'Practice Range',
     tag: 'FREEPLAY',
     difficulty: 'easy',
-    blurb: 'Infinite credits, unlimited buy, respawning targets. No round timer.',
-    map: 'Steelfall',
+    blurb: 'Open range. Moving targets, no timers, unlimited credits.',
+    map: 'Rangeyard',
+    mapId: 'rangeyard',
   },
 ];
 

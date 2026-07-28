@@ -350,7 +350,7 @@ export function Lobby() {
 
       <button type="button" className="play-btn" onClick={play}>
         <span className="pb-label">PLAY</span>
-        <span className="pb-sub">{mode.tag} · STEELFALL</span>
+        <span className="pb-sub">{mode.tag} · {mode.map.toUpperCase()}</span>
       </button>
 
       <div className="lobby-foot">

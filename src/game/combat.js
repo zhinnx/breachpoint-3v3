@@ -2,14 +2,14 @@
  * BREACHPOINT — Firing, ballistics, recoil, reload and utility resolution.
  * Implements PRD §6 (combat mechanics) and §7 (weapon behaviour).
  */
-import { ACCURACY, MOVE, PHASE, SURFACE } from './config.js';
+import { ACCURACY, MOVE, PHASE, SURFACE, RECOIL_STANCE, AIM_ASSIST } from './config.js';
 import { getWeapon, FIRE_MODE, fireInterval, resolveDamage } from './weapons.js';
 import { UTILITY } from './weapons.js';
 import { castWorld, resolveSphere, hasLineOfSight } from './raycast.js';
 import {
   world, currentWeaponRuntime, ensureWeaponRuntime, eyePosition, rayActor,
   spawnTracer, spawnImpact, spawnBlood, spawnMuzzle, spawnShell, spawnExplosion,
-  spawnSmoke, addCamShake, actorHeight, headCenter, chestCenter,
+  spawnSmoke, addCamShake, actorHeight, headCenter, chestCenter, spawnDamageNumber,
 } from './world.js';
 import * as Audio from './audio.js';
 
@@ -60,6 +60,67 @@ function randomConeDir(dir, spreadDeg) {
   const nz = dir[2] + uz * ox + vz * oy;
   const l = Math.hypot(nx, ny, nz) || 1;
   return [nx / l, ny / l, nz / l];
+}
+
+/**
+ * Aim assist. Two mild effects, both off unless a target is already close to
+ * the reticle:
+ *   pull     rotates the view a little toward the nearest visible enemy
+ *   friction slows the look while sweeping across a target
+ * It never locks on: `pull` closes only a fraction of the remaining angle, and
+ * only inside a few degrees.
+ */
+export function applyAimAssist(actor, dt, isTouch) {
+  if (!AIM_ASSIST.enabled || !actor.alive) return 1;
+  const cfg = isTouch ? AIM_ASSIST.touch : AIM_ASSIST.mouse;
+  const eye = eyePosition(actor);
+  const face = aimDirection(actor);
+
+  let best = null;
+  let bestAng = Infinity;
+  for (const other of world.actorList) {
+    if (!other.alive || other.team === actor.team || other.id === actor.id) continue;
+    const c = chestCenter(other);
+    const dx = c[0] - eye[0];
+    const dy = c[1] - eye[1];
+    const dz = c[2] - eye[2];
+    const dist = Math.hypot(dx, dy, dz);
+    if (dist > cfg.maxRange || dist < 0.6) continue;
+    const inv = 1 / dist;
+    const dot = (dx * inv) * face[0] + (dy * inv) * face[1] + (dz * inv) * face[2];
+    if (dot <= 0) continue;
+    const ang = Math.acos(Math.min(1, dot)) * 180 / Math.PI;
+    if (ang > AIM_ASSIST.frictionAngleDeg) continue;
+    if (!hasLineOfSight(eye, c, 0.05)) continue;
+    if (ang < bestAng) { bestAng = ang; best = { actor: other, c, dist }; }
+  }
+  if (!best) return 1;
+
+  const adsBoost = actor.ads > 0.5 ? cfg.adsBonus : 1;
+
+  // magnetism
+  if (bestAng <= cfg.maxAngleDeg) {
+    const dx = best.c[0] - eye[0];
+    const dy = best.c[1] - eye[1];
+    const dz = best.c[2] - eye[2];
+    const hyp = Math.hypot(dx, dz) || 0.0001;
+    const wantYaw = Math.atan2(-dx, -dz);
+    const wantPitch = Math.atan2(dy, hyp);
+    let dyaw = wantYaw - actor.yaw;
+    while (dyaw > Math.PI) dyaw -= Math.PI * 2;
+    while (dyaw < -Math.PI) dyaw += Math.PI * 2;
+    const dpitch = wantPitch - actor.pitch;
+    // Falls off toward the edge of the cone so it never feels like a snap.
+    const strength = (1 - bestAng / cfg.maxAngleDeg) * cfg.pull * adsBoost;
+    const k = Math.min(0.5, strength * dt);
+    actor.yaw += dyaw * k;
+    actor.pitch = Math.max(-1.5, Math.min(1.5, actor.pitch + dpitch * k));
+  }
+
+  // friction: returned so the input layer can scale raw look delta
+  const fr = isTouch ? AIM_ASSIST.frictionTouch : AIM_ASSIST.frictionMouse;
+  const t = 1 - Math.min(1, bestAng / AIM_ASSIST.frictionAngleDeg);
+  return 1 - (1 - fr) * t;
 }
 
 export function aimDirection(actor) {
@@ -230,13 +291,31 @@ export function fireWeapon({ actor, entity, store, phase, aimOverride, forcedTar
   return true;
 }
 
+/**
+ * Stance multiplier for recoil. Firing planted, and especially planted while
+ * crouched, is markedly more controllable than firing on the move.
+ */
+export function recoilStanceMul(actor) {
+  const speed = Math.hypot(actor.vel[0], actor.vel[2]);
+  const still = speed < RECOIL_STANCE.stillSpeed;
+  let m;
+  if (!actor.grounded) m = RECOIL_STANCE.airborne;
+  else if (actor.sprinting && speed > 0.5) m = RECOIL_STANCE.sprinting;
+  else if (!still) m = RECOIL_STANCE.moving;
+  else if (actor.crouch > 0.5) m = RECOIL_STANCE.crouchStill;
+  else m = RECOIL_STANCE.standingStill;
+  if (actor.ads > 0.5) m *= RECOIL_STANCE.adsBonus;
+  return m;
+}
+
 function applyRecoil(actor, weapon, wr) {
   const pat = weapon.pattern[wr.recoilIndex % weapon.pattern.length];
   wr.recoilIndex += 1;
+  const stance = recoilStanceMul(actor);
   const adsDamp = 1 - actor.ads * 0.32;
   const crouchDamp = 1 - actor.crouch * 0.14;
-  const v = (weapon.recoil.vertical * pat[1]) * adsDamp * crouchDamp;
-  const h = (weapon.recoil.horizontal * pat[0]) * adsDamp * crouchDamp;
+  const v = (weapon.recoil.vertical * pat[1]) * adsDamp * crouchDamp * stance;
+  const h = (weapon.recoil.horizontal * pat[0]) * adsDamp * crouchDamp * stance;
   actor.recoilVelP += (v * Math.PI) / 180 * 12;
   actor.recoilVelY += (h * Math.PI) / 180 * 12;
   actor.kickback = Math.min(1, actor.kickback + weapon.recoil.kickback * 8);
@@ -305,7 +384,7 @@ function resolveBullet({ actor, entity, store, origin, dir, weapon, isPellet }) 
     spawnBlood(endPoint, dir);
     Audio.playImpact({ surface: SURFACE.BODY, pos: endPoint });
 
-    store.applyDamage({
+    const dealt = store.applyDamage({
       targetId: hitActor.id,
       attackerId: actor.id,
       weaponId: weapon.id,
@@ -314,6 +393,11 @@ function resolveBullet({ actor, entity, store, origin, dir, weapon, isPellet }) 
       dirFromAttacker: dmgDir,
       cause: 'bullet',
     });
+
+    // Floating damage number, only for the local player's own hits.
+    if (actor.isPlayer && dealt > 0) {
+      spawnDamageNumber(endPoint, dealt, hitZone === 'head', !hitActor.alive);
+    }
   } else if (worldHit.hit) {
     spawnImpact(worldHit.point, worldHit.normal, worldHit.surf);
     Audio.playImpact({ surface: worldHit.surf, pos: worldHit.point });

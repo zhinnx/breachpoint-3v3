@@ -22,6 +22,7 @@
 import * as THREE from 'three';
 import { Pathfinding } from 'three-pathfinding';
 import { SOLIDS, PLAY, LEVEL, LADDERS, NAV_REGIONS, SPAWNS } from './steelfall.js';
+import { onMapChange } from './mapRegistry.js';
 
 export const ZONE = 'steelfall';
 
@@ -34,17 +35,21 @@ const FLOOR_CLUSTER = 1.9; // surfaces closer than this are the same "floor"
 const MIN_COMPONENT = 8; // discard tiny islands (single crate tops etc.)
 const MAX_HEIGHT = 9.0;
 
-const IX0 = Math.ceil(PLAY.minX / CELL);
-const IX1 = Math.floor(PLAY.maxX / CELL) - 1;
-const IZ0 = Math.ceil(PLAY.minZ / CELL);
-const IZ1 = Math.floor(PLAY.maxZ / CELL) - 1;
+// Bounds depend on the active map, so read them at bake time, not import time.
+const bounds = () => ({
+  IX0: Math.ceil(PLAY.minX / CELL),
+  IX1: Math.floor(PLAY.maxX / CELL) - 1,
+  IZ0: Math.ceil(PLAY.minZ / CELL),
+  IZ1: Math.floor(PLAY.maxZ / CELL) - 1,
+});
 
 // ------------------------------------------------------------------ solid lookup
 const BUCKET = 4;
 const solidBuckets = new Map();
 const bkey = (bx, bz) => bx * 8192 + bz;
 
-(function indexSolids() {
+function indexSolids() {
+  solidBuckets.clear();
   for (let i = 0; i < SOLIDS.length; i++) {
     const s = SOLIDS[i];
     const bx0 = Math.floor((s.min[0] - 1) / BUCKET);
@@ -60,7 +65,8 @@ const bkey = (bx, bz) => bx * 8192 + bz;
       }
     }
   }
-})();
+}
+indexSolids();
 
 function solidsNear(x, z) {
   return solidBuckets.get(bkey(Math.floor(x / BUCKET), Math.floor(z / BUCKET))) || [];
@@ -128,6 +134,7 @@ function bake() {
   const cells = [];
   const cellMap = new Map();
 
+  const { IX0, IX1, IZ0, IZ1 } = bounds();
   for (let ix = IX0; ix <= IX1; ix++) {
     for (let iz = IZ0; iz <= IZ1; iz++) {
       const cx = ix + 0.5;
@@ -266,6 +273,18 @@ export function buildNavMesh() {
   if (_pathfinding) return _pathfinding;
   return bake();
 }
+
+/** Drop the baked mesh so the next query rebuilds against the new map. */
+export function invalidateNavMesh() {
+  _pathfinding = null;
+  _zoneData = null;
+  _geometry = null;
+  _cells = null;
+  _cellMap = null;
+  _stats = null;
+  indexSolids();
+}
+onMapChange(() => invalidateNavMesh());
 
 export function getPathfinding() {
   return _pathfinding || buildNavMesh();

@@ -30,6 +30,7 @@ export function BuyMenu() {
   const buyArmor = useGame((s) => s.buyArmor);
   const buyUtility = useGame((s) => s.buyUtility);
   const toggleBuyMenu = useGame((s) => s.toggleBuyMenu);
+  const readyUp = useGame((s) => s.readyUp);
 
   const [tab, setTab] = useState('primary');
 
@@ -76,6 +77,15 @@ export function BuyMenu() {
           <span className="label">CREDITS</span>
           <b className="num">{practice ? 'MAX' : credits.toLocaleString('en-US')}</b>
         </div>
+        {phase === PHASE.BUY && !practice && (
+          <button
+            type="button"
+            className="btn btn-hot buy-ready"
+            onClick={() => { readyUp(); toggleBuyMenu(false); Audio.playUI('ui_click'); }}
+          >
+            READY
+          </button>
+        )}
         <button
           type="button"
           className="close-btn"

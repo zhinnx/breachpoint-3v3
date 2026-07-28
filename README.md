@@ -55,13 +55,25 @@ Deploy to Vercel: the repo ships `vercel.json` (framework `vite`, output `dist`)
 Layout switches on **pointer capability**, not width, so a narrow desktop window
 keeps mouse-and-keyboard controls and a large tablet still gets touch.
 
+## Maps
+
+| Map | Used by | Notes |
+|---|---|---|
+| **Dustline** | Normal / Hard | Outdoor daylight, 68 x 76 m. Three lanes: walled west compound, open mid plaza with a two-storey platform, east container yard. |
+| **Rangeyard** | Practice | Flat open training yard. No timers, no buy phase, unlimited credits. Targets run walk / sprint / zigzag / strafe drills. |
+
+Maps are data modules behind a live registry (`src/game/mapRegistry.js`), so the
+raycaster, navmesh and renderer all follow a switch automatically.
+
 ## Match rules (PRD §1–§5)
 
 - **Format** — 3v3: you + 2 AI teammates vs 3 AI opponents.
 - **Match** — max 7 rounds, first team to **4 round wins** takes the match.
-- **Buy phase** — 30s, invulnerable inside the spawn zone. No purchase → free PX-1.
+- **Buy phase** — 15s, invulnerable inside the spawn zone, skippable with **READY**. No purchase → free PX-1.
 - **Combat phase** — 120s. Round ends on total elimination; on timeout the team with more survivors wins; a tie triggers 20s sudden death.
 - **Sides swap** after round 4.
+- **Between rounds** — HP always resets to 100. Your weapon carries over if you
+  survived; if you died you respawn with the free PX-1 and must rebuy.
 - **Economy** — 8,000 starting credits · +3,000 round win · +2,000 round loss · +250 per kill. Credits carry across rounds, so eco rounds and comebacks work.
 - **Damage** — 100 HP. Headshot ×4, body ×1, limb ×0.75. Light vest −25% body damage, heavy vest −40% (−5% speed). Armor never reduces headshot damage.
 
@@ -79,6 +91,14 @@ keeps mouse-and-keyboard controls and a large tablet still gets touch.
 | Hailstorm | LMG | 5,500 | 30 | Full-auto | 75 | 4.0s |
 
 Utility: Frag (400) · Flashbang (200) · Smoke (300) · Medkit (300) · Light Vest (400) · Heavy Vest (1,000).
+
+**Recoil is stance-aware**: firing while planted is easier to control than on
+the move, and crouching while planted is the most stable of all
+(`RECOIL_STANCE` in `src/game/config.js`). Firing mid-air is the worst.
+
+**Aim assist** is on by default and deliberately weak: it nudges toward a
+nearby visible enemy and adds a little look friction while crossing one, but it
+never locks. Touch gets slightly more help than mouse.
 
 Each weapon has a unique recoil pattern, range falloff and ADS behaviour. The Vantage .50's scope emits a **lens glint** that can reveal your position.
 
@@ -179,7 +199,19 @@ width from 320 to 1920.
    eyeballing them: team red on panel (2.96 vs 3.0 required) and both
    team-colour text ramps. Fixed by splitting each team colour into a dark
    fill ramp and a lighter text ramp.
-8. **Bots hit ~97% of shots** — the aim vector was blended too strongly toward the exact hitbox, making `aimError` irrelevant. Added a per-shot error cone scaled by range/movement/spray; accuracy now lands in a human 10–46% band.
+8. **"Enemy AI is auto-aim" / "shots from nowhere"** — bot `viewDistance` was
+   60-75m on a 76m map, so bots could see and open fire from anywhere on the
+   level. Cut to 26/34/44m by difficulty, added a `firstShotDelay` between
+   acquiring and firing, a `targetSwitchDelay` so bots cannot instantly snap to
+   a second target, and a `missBias` that sends a fraction of shots wide.
+9. **Map too dark** — replaced the enclosed night foundry with an outdoor
+   daylight map, and added red/blue team outline shells so operators are
+   visible against any background.
+10. **Camera and weapon shake** — view bob and weapon sway were roughly 3x too
+   strong; both reduced and damped further while aiming.
+11. **Fire button could not aim** — the mobile fire control is now a drag
+   surface: hold to shoot, slide the same thumb to steer.
+12. **Bots hit ~97% of shots** — the aim vector was blended too strongly toward the exact hitbox, making `aimError` irrelevant. Added a per-shot error cone scaled by range/movement/spray; accuracy now lands in a human 10–46% band.
 
 ---
 

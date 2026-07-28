@@ -14,7 +14,7 @@ import {
 import { moveActor } from './movement.js';
 import {
   fireWeapon, tickRecoil, tickReload, startReload, tickProjectiles,
-  throwUtility, startHeal, tickHeal, cancelReload,
+  throwUtility, startHeal, tickHeal, cancelReload, applyAimAssist,
 } from './combat.js';
 import { tickBot, createAI, resetBlackboard, botBuy } from './ai.js';
 import * as Audio from './audio.js';
@@ -37,6 +37,8 @@ export class Simulation {
     this.initialized = false;
     // Browsers opt in; headless simulation drives the clock from its own dt.
     this.useWallClock = false;
+    this.isTouch = false;
+    this.aimFriction = 1;
     this.syncAccum = 0;
     this.hurtFlash = 0;
     this.prevHp = 100;
@@ -233,13 +235,21 @@ export class Simulation {
     const canAct = phase === PHASE.COMBAT || phase === PHASE.SUDDEN_DEATH;
 
     // --- look (mouse deltas accumulated by the input layer)
-    const sens = s.settings.sensitivity * 0.0022;
+    const sens = s.settings.sensitivity * 0.0022 * (this.aimFriction ?? 1);
     const adsSens = 1 - actor.ads * 0.55;
     actor.yaw -= this.mouseDelta[0] * sens * adsSens;
     const pitchDelta = this.mouseDelta[1] * sens * adsSens * (s.settings.invertY ? -1 : 1);
     actor.pitch = Math.max(-1.5, Math.min(1.5, actor.pitch - pitchDelta));
     this.mouseDelta[0] = 0;
     this.mouseDelta[1] = 0;
+
+    // Aim assist: gentle magnetism toward a nearby visible enemy, plus look
+    // friction while crossing one. Runs after raw look so it can correct it.
+    if (canAct) {
+      this.aimFriction = applyAimAssist(actor, dt, !!this.isTouch);
+    } else {
+      this.aimFriction = 1;
+    }
 
     // --- ADS blend (PRD §6)
     const wantAds = input.ads && !actor.sprinting && actor.healing <= 0 && canAct;

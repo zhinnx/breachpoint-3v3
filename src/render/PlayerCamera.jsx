@@ -9,6 +9,7 @@ import React, { useRef } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { world, eyePosition, actorHeight } from '../game/world.js';
+import { castWorld } from '../game/raycast.js';
 import { getWeapon } from '../game/weapons.js';
 import { MOVE, PHASE } from '../game/config.js';
 import { useGame } from '../game/store.js';
@@ -30,31 +31,38 @@ export function PlayerCamera({ actor, entity }) {
     const weapon = getWeapon(actor.currentWeapon);
 
     if (!actor.alive) {
-      // ---- death cam: drop to the ground, then spectate a living teammate
+      // Death cam. Previously it snapped to a hard roll and could clip inside
+      // geometry. Now it eases down, keeps a level horizon, and pulls back to
+      // a safe distance before handing over to spectate.
       deadT.current += dt;
-      const t = Math.min(1, deadT.current / 1.1);
+      const t = Math.min(1, deadT.current / 1.4);
+      const ease = 1 - Math.pow(1 - t, 3);
       const h = actorHeight(actor);
-      const eyeY = actor.pos[1] + lerp(h + MOVE.eyeOffset, 0.34, t);
+      const eyeY = actor.pos[1] + lerp(h + MOVE.eyeOffset, 0.55, ease);
+      camera.rotation.order = 'YXZ';
       camera.position.set(actor.pos[0], eyeY, actor.pos[2]);
       camera.rotation.set(
-        lerp(actor.pitch, -0.32, t),
+        lerp(actor.pitch, -0.22, ease),
         actor.deathYaw || actor.yaw,
-        lerp(0, 0.42, t),
+        lerp(0, 0.12, ease),
         'YXZ',
       );
 
-      // after 2.2s follow a living ally in third person
-      if (deadT.current > 2.2) {
+      if (deadT.current > 2.0) {
         const allies = world.actorList.filter((a) => a.alive && a.team === actor.team);
         if (allies.length) {
           const tgt = allies[spectateIdx.current % allies.length];
           const th = actorHeight(tgt);
-          const back = 2.6;
           const fx = -Math.sin(tgt.yaw);
           const fz = -Math.cos(tgt.yaw);
+          // Pull the chase camera in if a wall is behind the target.
+          const eye = [tgt.pos[0], tgt.pos[1] + th + 0.5, tgt.pos[2]];
+          const backDir = [-fx, 0, -fz];
+          const hit = castWorld(eye, backDir, 3.0);
+          const back = hit.hit ? Math.max(0.9, hit.t - 0.35) : 2.8;
           const desired = new THREE.Vector3(
             tgt.pos[0] - fx * back,
-            tgt.pos[1] + th + 0.55,
+            tgt.pos[1] + th + 0.5,
             tgt.pos[2] - fz * back,
           );
           camera.position.lerp(desired, Math.min(1, dt * 4));
@@ -76,8 +84,9 @@ export function PlayerCamera({ actor, entity }) {
     const speed = Math.hypot(actor.vel[0], actor.vel[2]);
     bobT.current += dt * (speed * 1.85 + 1.2);
     const bobAmt = Math.min(1, speed / MOVE.walkSpeed) * (actor.grounded ? 1 : 0) * (1 - actor.ads * 0.85);
-    const bobY = Math.abs(Math.sin(bobT.current)) * 0.022 * bobAmt;
-    const bobX = Math.sin(bobT.current * 0.5) * 0.014 * bobAmt;
+    // Playtest: the old bob read as violent. Roughly a third of the amplitude.
+    const bobY = Math.abs(Math.sin(bobT.current)) * 0.008 * bobAmt;
+    const bobX = Math.sin(bobT.current * 0.5) * 0.005 * bobAmt;
 
     // ---- camera shake (explosions, firing, landing)
     const sh = world.camShake;
@@ -102,7 +111,7 @@ export function PlayerCamera({ actor, entity }) {
     camera.rotation.order = 'YXZ';
     camera.rotation.y = actor.yaw + actor.recoilYaw;
     camera.rotation.x = actor.pitch + actor.recoilPitch + shakeOffset.current.y * 0.35;
-    camera.rotation.z = Math.sin(bobT.current * 0.5) * 0.006 * bobAmt + shakeOffset.current.x * 0.28;
+    camera.rotation.z = Math.sin(bobT.current * 0.5) * 0.002 * bobAmt + shakeOffset.current.x * 0.28;
 
     // ---- FOV: narrows on ADS (PRD §6), widens slightly when sprinting
     const baseFov = settings.fov;

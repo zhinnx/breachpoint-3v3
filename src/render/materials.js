@@ -327,19 +327,30 @@ export function getMapMaterials() {
 
     return {
       rustWall: mk({ color: '#6e5a4a', map: rustTex, normalMap: rustNrm, roughness: 0.92, metalness: 0.35, normalScale: new THREE.Vector2(1.1, 1.1) }),
-      concreteWall: mk({ color: '#8b8b86', map: concreteTex, normalMap: concreteNrm, roughness: 0.96, metalness: 0.02 }),
+      concreteWall: mk({ color: '#c4b89f', map: concreteTex, normalMap: concreteNrm, roughness: 0.96, metalness: 0.02 }),
       concreteFloor: mk({ color: '#6d6d69', map: concreteTex, normalMap: concreteNrm, roughness: 0.94, metalness: 0.03 }),
       gravel: mk({ color: '#5d5a53', map: gravelTex, normalMap: gravelNrm, roughness: 1.0, metalness: 0.0 }),
       metalPlate: mk({ color: '#7c8189', map: plateTex, normalMap: plateNrm, roughness: 0.58, metalness: 0.8 }),
       metalGrate: mk({ color: '#5b6068', map: grateTex, normalMap: grateNrm, roughness: 0.66, metalness: 0.85 }),
-      crateWood: mk({ color: '#8a6034', map: woodTex, normalMap: woodNrm, roughness: 0.85, metalness: 0.05 }),
+      crateWood: mk({ color: '#a87a44', map: woodTex, normalMap: woodNrm, roughness: 0.85, metalness: 0.05 }),
       crateMetal: mk({ color: '#5c6a55', map: plateTex, normalMap: plateNrm, roughness: 0.68, metalness: 0.7 }),
-      machine: mk({ color: '#4e5359', map: plateTex, normalMap: plateNrm, roughness: 0.55, metalness: 0.88 }),
+      machine: mk({ color: '#6e747c', map: plateTex, normalMap: plateNrm, roughness: 0.55, metalness: 0.88 }),
       pipe: mk({ color: '#6b625a', map: rustTex, normalMap: rustNrm, roughness: 0.72, metalness: 0.72 }),
-      barrel: mk({ color: '#7d5a3a', map: rustTex, normalMap: rustNrm, roughness: 0.8, metalness: 0.55 }),
-      railing: mk({ color: '#8a9099', roughness: 0.5, metalness: 0.9 }),
+      barrel: mk({ color: '#9a6b40', map: rustTex, normalMap: rustNrm, roughness: 0.8, metalness: 0.55 }),
+      railing: mk({ color: '#a6adb6', roughness: 0.5, metalness: 0.9 }),
       ceiling: mk({ color: '#3d4148', map: plateTex, normalMap: plateNrm, roughness: 0.8, metalness: 0.6 }),
       hazard: mk({ color: '#ff7b1c', emissive: '#ff5500', emissiveIntensity: 1.6, roughness: 0.5, metalness: 0.3 }),
+
+      // ---- daylight map palette (Dustline / Rangeyard) ----
+      // Pale, high-albedo surfaces so dark operator silhouettes pop against
+      // them. The old map's problem was low-albedo walls in low light.
+      sandFloor: mk({ color: '#c9b795', map: gravelTex, normalMap: gravelNrm, roughness: 0.96, metalness: 0.0 }),
+      plaster: mk({ color: '#d8cbb0', map: concreteTex, normalMap: concreteNrm, roughness: 0.94, metalness: 0.02 }),
+      stone: mk({ color: '#b9ac93', map: concreteTex, normalMap: concreteNrm, roughness: 0.95, metalness: 0.02 }),
+      metalDeck: mk({ color: '#9aa0a6', map: plateTex, normalMap: plateNrm, roughness: 0.58, metalness: 0.72 }),
+      container: mk({ color: '#7d8a6a', map: plateTex, normalMap: plateNrm, roughness: 0.7, metalness: 0.55 }),
+      canopy: mk({ color: '#b6a488', map: plateTex, normalMap: plateNrm, roughness: 0.86, metalness: 0.3 }),
+      target: mk({ color: '#d94f2b', roughness: 0.7, metalness: 0.1 }),
     };
   });
 }
@@ -420,6 +431,23 @@ export function getOperatorMaterials(team) {
       visor: new THREE.MeshStandardMaterial({ color: '#0d1116', roughness: 0.18, metalness: 0.9 }),
     };
   });
+}
+
+/**
+ * Team outline material. Renders behind geometry (depthTest false) so the
+ * silhouette shows through the environment, which is what makes enemies
+ * findable on a busy map.
+ */
+export function getOutlineMaterial(team) {
+  return make(`outline-${team}`, () => new THREE.MeshBasicMaterial({
+    color: team === 'BLUE' ? '#3fa9ff' : '#ff3b2f',
+    side: THREE.BackSide,
+    transparent: true,
+    opacity: 0.55,
+    depthTest: false,
+    depthWrite: false,
+    toneMapped: false,
+  }));
 }
 
 export function disposeMaterialCache() {

@@ -4,6 +4,8 @@ const server = await preview({ preview:{port:4202,host:'127.0.0.1'}, logLevel:'e
 const b = await puppeteer.launch({headless:'new',args:['--no-sandbox','--disable-setuid-sandbox','--use-gl=swiftshader','--enable-unsafe-swiftshader','--enable-webgl','--ignore-gpu-blocklist','--disable-dev-shm-usage']});
 
 const shots = [
+  {n:'ui-map-day', w:1280,h:800, touch:false, stage:'combat'},
+  {n:'ui-practice', w:1280,h:800, touch:false, stage:'practice'},
   {n:'ui-lobby-desktop', w:1280,h:800, touch:false, stage:'lobby'},
   {n:'ui-lobby-phone',   w:390, h:844, touch:true,  stage:'lobby'},
   {n:'ui-hud-desktop',   w:1280,h:800, touch:false, stage:'combat'},
@@ -23,6 +25,19 @@ for (const s of shots) {
   await p.goto('http://127.0.0.1:4202/',{waitUntil:'domcontentloaded',timeout:60000});
   await p.waitForSelector('.lobby',{timeout:45000});
   await new Promise(r=>setTimeout(r,3500));
+  if (s.stage==='practice') {
+    await p.evaluate(()=>{ const st=window.__BP_STORE__.getState(); st.startMatch('practice'); });
+    await p.waitForSelector('.hud',{timeout:30000});
+    await new Promise(r=>setTimeout(r,4000));
+    await p.addStyleTag({content:'.engage,.death,.hurt-ov{display:none!important}'});
+    await p.evaluate(()=>{const st=window.__BP_STORE__.getState();
+      const a=window.__BP_WORLD__.actors[st.playerId]; if(a){a.pos=[0,0,-14];a.yaw=0;a.pitch=0.02;}});
+    await new Promise(r=>setTimeout(r,4000));
+    await p.screenshot({path:`tests/${s.n}.png`});
+    console.log('captured', s.n);
+    await p.close();
+    continue;
+  }
   if (s.stage!=='lobby') {
     await p.click('.play-btn');
     await p.waitForSelector('.hud',{timeout:30000});

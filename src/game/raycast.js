@@ -7,6 +7,7 @@
  * dipisah dari rendering") and makes results reproducible for future netcode.
  */
 import { SOLIDS } from './steelfall.js';
+import { onMapChange } from './mapRegistry.js';
 
 // Spatial hash over XZ so a ray doesn't test all ~400 brushes.
 const CELL = 6;
@@ -16,7 +17,8 @@ function key(cx, cz) {
   return cx * 4096 + cz;
 }
 
-(function buildGrid() {
+function buildGrid() {
+  grid.clear();
   for (let i = 0; i < SOLIDS.length; i++) {
     const s = SOLIDS[i];
     const cx0 = Math.floor(s.min[0] / CELL);
@@ -32,7 +34,11 @@ function key(cx, cz) {
       }
     }
   }
-})();
+}
+buildGrid();
+// A stale spatial hash after a map switch would silently break line-of-sight
+// and hitscan, so rebuild it whenever the active map changes.
+onMapChange(() => buildGrid());
 
 const _visited = new Set();
 

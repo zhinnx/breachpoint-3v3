@@ -16,6 +16,7 @@ import * as THREE from 'three';
 import { useFrame } from '@react-three/fiber';
 import { world } from '../game/world.js';
 import { WEAPONS } from '../game/weapons.js';
+import { Billboard, Text } from '@react-three/drei';
 
 // ------------------------------------------------------------------ shared textures
 function makeRadial(inner = 'rgba(255,255,255,1)', outer = 'rgba(255,255,255,0)', stops) {
@@ -520,6 +521,58 @@ function ScopeGlints() {
   );
 }
 
+/**
+ * Floating damage numbers. Pooled Text sprites that rise and fade from the
+ * point of impact, so the player can read exactly how much each shot did.
+ */
+function DamageNumbers() {
+  const N = 16;
+  const refs = useRef([]);
+  useFrame(() => {
+    const list = world.damageNumbers;
+    for (let i = 0; i < N; i++) {
+      const g = refs.current[i];
+      if (!g) continue;
+      const d = list[list.length - 1 - i];
+      if (!d) { g.visible = false; continue; }
+      const k = d.t / d.life;
+      g.visible = true;
+      g.position.set(
+        d.pos[0] + d.drift[0] * k,
+        d.pos[1] + d.drift[1] * k,
+        d.pos[2] + d.drift[2] * k,
+      );
+      const s = (d.headshot ? 1.25 : 1) * (1 + k * 0.25);
+      g.scale.setScalar(s);
+      const txt = g.children[0];
+      if (txt && txt.material) {
+        txt.material.opacity = Math.max(0, 1 - k * k);
+        txt.material.transparent = true;
+      }
+      if (txt && txt.text !== String(d.amount)) txt.text = String(d.amount);
+      if (txt) txt.color = d.killed ? '#ff3b2f' : d.headshot ? '#ff6b1a' : '#ffffff';
+    }
+  });
+  return (
+    <group>
+      {Array.from({ length: N }).map((_, i) => (
+        <Billboard key={i} ref={(el) => { refs.current[i] = el; }} visible={false}>
+          <Text
+            fontSize={0.34}
+            anchorX="center"
+            anchorY="middle"
+            outlineWidth={0.028}
+            outlineColor="#12100c"
+            toneMapped={false}
+          >
+            0
+          </Text>
+        </Billboard>
+      ))}
+    </group>
+  );
+}
+
 export function Effects() {
   return (
     <group>
@@ -532,6 +585,7 @@ export function Effects() {
       <SmokeClouds />
       <Shells />
       <ScopeGlints />
+      <DamageNumbers />
     </group>
   );
 }

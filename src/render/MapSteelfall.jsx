@@ -10,7 +10,7 @@ import React, { useMemo, useRef, useLayoutEffect } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
 import { RigidBody, CuboidCollider } from '@react-three/rapier';
-import { brushes, SODIUM_LAMPS, MOON_SHAFTS, PLAY, WALL_H, COLLIDERS } from '../game/steelfall.js';
+import { brushes, SODIUM_LAMPS, MOON_SHAFTS, PLAY, WALL_H, COLLIDERS, isOutdoor, getActiveMapId } from '../game/steelfall.js';
 import { getMapMaterials } from './materials.js';
 
 const box = new THREE.BoxGeometry(1, 1, 1);
@@ -266,6 +266,39 @@ function GroundHaze() {
   );
 }
 
+/** Gradient sky dome for the outdoor maps. */
+function SkyDome() {
+  const mat = useMemo(() => new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    depthWrite: false,
+    uniforms: {
+      top: { value: new THREE.Color('#5c9fd6') },
+      mid: { value: new THREE.Color('#a8cbe4') },
+      bot: { value: new THREE.Color('#e3d6bb') },
+    },
+    vertexShader: `
+      varying vec3 vPos;
+      void main(){ vPos = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }
+    `,
+    fragmentShader: `
+      uniform vec3 top; uniform vec3 mid; uniform vec3 bot;
+      varying vec3 vPos;
+      void main(){
+        float h = normalize(vPos).y;
+        vec3 c = h > 0.0 ? mix(mid, top, pow(h, 0.65)) : mix(mid, bot, pow(-h, 0.5));
+        gl_FragColor = vec4(c, 1.0);
+      }
+    `,
+  }), []);
+  // fog must not tint the dome, and it has to sit inside the camera far plane
+  // (220) or the corners clip to the clear colour.
+  return (
+    <mesh material={mat} frustumCulled={false} renderOrder={-1}>
+      <sphereGeometry args={[160, 24, 16]} />
+    </mesh>
+  );
+}
+
 export function MapSteelfall({ quality = 'high' }) {
   const materials = getMapMaterials();
   const { scene } = useThree();
@@ -281,11 +314,21 @@ export function MapSteelfall({ quality = 'high' }) {
   }, []);
 
   // Fog gives the foundry depth and hides the far wall seams.
+  const outdoor = isOutdoor();
+  const mapId = getActiveMapId();
+
   useLayoutEffect(() => {
-    scene.fog = new THREE.FogExp2('#131a26', 0.0085);
-    scene.background = new THREE.Color('#0b111b');
+    if (outdoor) {
+      // Bright desert daylight. Thin fog only, so distant enemies stay legible
+      // instead of dissolving into haze.
+      scene.fog = new THREE.FogExp2('#cdbfa4', 0.0042);
+      scene.background = new THREE.Color('#b8d4e8');
+    } else {
+      scene.fog = new THREE.FogExp2('#131a26', 0.0085);
+      scene.background = new THREE.Color('#0b111b');
+    }
     return () => { scene.fog = null; };
-  }, [scene]);
+  }, [scene, outdoor, mapId]);
 
   const lamps = quality === 'low' ? SODIUM_LAMPS.filter((_, i) => i % 2 === 0) : SODIUM_LAMPS;
   const shafts = quality === 'low' ? MOON_SHAFTS.slice(0, 4) : MOON_SHAFTS;
@@ -309,38 +352,67 @@ export function MapSteelfall({ quality = 'high' }) {
       </RigidBody>
 
       {/* ---------------- lighting (PRD §9) ---------------- */}
-      <ambientLight intensity={0.62} color="#6b7d99" />
-      <hemisphereLight color="#5f80b5" groundColor="#3a2c20" intensity={1.15} />
-      {/* cold moonlight key */}
-      <directionalLight
-        position={[-24, 34, -18]}
-        intensity={1.75}
-        color="#9fbdff"
-        castShadow={quality !== 'low'}
-        shadow-mapSize-width={quality === 'high' ? 1536 : 1024}
-        shadow-mapSize-height={quality === 'high' ? 1536 : 1024}
-        shadow-camera-left={-34}
-        shadow-camera-right={34}
-        shadow-camera-top={34}
-        shadow-camera-bottom={-34}
-        shadow-camera-near={1}
-        shadow-camera-far={90}
-        shadow-bias={-0.0012}
-        shadow-normalBias={0.035}
-      />
-      {/* warm bounce from the foundry floor */}
-      <directionalLight position={[18, 12, 22]} intensity={0.55} color="#ff9c4a" />
+      {outdoor ? (
+        <>
+          {/* Midday sun. High ambient + hemisphere so shadowed faces still
+              read: the previous map was unplayably dark in cover. */}
+          <ambientLight intensity={1.45} color="#e8ddc8" />
+          <hemisphereLight color="#cfe4f5" groundColor="#b9a684" intensity={2.1} />
+          <directionalLight
+            position={[38, 62, 26]}
+            intensity={3.1}
+            color="#fff4dc"
+            castShadow={quality !== 'low'}
+            shadow-mapSize-width={quality === 'high' ? 2048 : 1024}
+            shadow-mapSize-height={quality === 'high' ? 2048 : 1024}
+            shadow-camera-left={-46}
+            shadow-camera-right={46}
+            shadow-camera-top={46}
+            shadow-camera-bottom={-46}
+            shadow-camera-near={1}
+            shadow-camera-far={140}
+            shadow-bias={-0.0009}
+            shadow-normalBias={0.03}
+          />
+          {/* warm bounce off the sand */}
+          <directionalLight position={[-24, 10, -18]} intensity={0.72} color="#ffd9a8" />
+          <directionalLight position={[0, 6, 34]} intensity={0.42} color="#bcd4e8" />
+        </>
+      ) : (
+        <>
+          <ambientLight intensity={0.62} color="#6b7d99" />
+          <hemisphereLight color="#5f80b5" groundColor="#3a2c20" intensity={1.15} />
+          <directionalLight
+            position={[-24, 34, -18]}
+            intensity={1.75}
+            color="#9fbdff"
+            castShadow={quality !== 'low'}
+            shadow-mapSize-width={quality === 'high' ? 1536 : 1024}
+            shadow-mapSize-height={quality === 'high' ? 1536 : 1024}
+            shadow-camera-left={-34}
+            shadow-camera-right={34}
+            shadow-camera-top={34}
+            shadow-camera-bottom={-34}
+            shadow-camera-near={1}
+            shadow-camera-far={90}
+            shadow-bias={-0.0012}
+            shadow-normalBias={0.035}
+          />
+          <directionalLight position={[18, 12, 22]} intensity={0.55} color="#ff9c4a" />
+        </>
+      )}
 
       {lamps.map((p, i) => <Lamp key={i} pos={p} />)}
       <LampLights lamps={lamps} count={quality === 'low' ? 4 : quality === 'medium' ? 6 : 7} />
       {shafts.map((s, i) => <MoonShaft key={i} {...s} />)}
 
       {/* smelter core glow (mid tower) */}
-      <pointLight position={[0, 2.4, 0]} color="#ff5a12" intensity={55} distance={18} decay={1.7} />
+      {!outdoor && <pointLight position={[0, 2.4, 0]} color="#ff5a12" intensity={55} distance={18} decay={1.7} />}
 
       {/* ---------------- atmospherics (PRD §13) ---------------- */}
-      {quality !== 'low' && <DustMotes count={quality === 'high' ? 520 : 260} />}
-      <GroundHaze />
+      {quality !== 'low' && <DustMotes count={quality === 'high' ? 340 : 180} />}
+      {!outdoor && <GroundHaze />}
+      {outdoor && <SkyDome />}
     </group>
   );
 }

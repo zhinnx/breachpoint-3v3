@@ -91,21 +91,23 @@ export function ViewModel({ actor, entity }) {
     lastYaw.current = actor.yaw;
     lastPitch.current = actor.pitch;
     const s = sway.current;
-    s.vx += (-dYaw * 2.4 - s.x * 14) * dt * 8;
-    s.vy += (dPitch * 2.0 - s.y * 14) * dt * 8;
+    s.vx += (-dYaw * 1.1 - s.x * 16) * dt * 8;
+    s.vy += (dPitch * 0.95 - s.y * 16) * dt * 8;
     s.vx *= 0.86; s.vy *= 0.86;
     s.x += s.vx * dt * 6;
     s.y += s.vy * dt * 6;
-    s.x = THREE.MathUtils.clamp(s.x, -0.06, 0.06);
-    s.y = THREE.MathUtils.clamp(s.y, -0.06, 0.06);
+    s.x = THREE.MathUtils.clamp(s.x, -0.026, 0.026);
+    s.y = THREE.MathUtils.clamp(s.y, -0.026, 0.026);
     const swayMul = 1 - ads * 0.82;
 
     // ---------------- walk bob
     const speed = Math.hypot(actor.vel[0], actor.vel[2]);
-    bobT.current += dt * (speed * 1.9 + 1.4);
-    const bobAmt = Math.min(1, speed / 4.4) * (1 - ads * 0.75) * (actor.grounded ? 1 : 0.15);
-    const bobX = Math.sin(bobT.current) * 0.016 * bobAmt;
-    const bobY = Math.abs(Math.cos(bobT.current)) * 0.014 * bobAmt;
+    bobT.current += dt * (speed * 1.45 + 1.1);
+    // Weapon bob was far too strong and read as the hands shaking violently.
+    // Cut to roughly a third, and damp it further while aiming.
+    const bobAmt = Math.min(1, speed / 4.4) * (1 - ads * 0.85) * (actor.grounded ? 1 : 0.12);
+    const bobX = Math.sin(bobT.current) * 0.0052 * bobAmt;
+    const bobY = Math.abs(Math.cos(bobT.current)) * 0.0045 * bobAmt;
 
     // ---------------- target pose
     let px = lerp(pose.hip.p[0], pose.ads.p[0], ads);

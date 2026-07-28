@@ -9,7 +9,7 @@
  */
 import { DIFFICULTY, PHASE, TEAM, MOVE } from './config.js';
 import { getWeapon, FIRE_MODE, UTILITY, WEAPONS } from './weapons.js';
-import { COVER_POINTS, LANE_PUSH_POINTS, SPAWNS, inBuyZone, LEVEL } from './steelfall.js';
+import { COVER_POINTS, LANE_PUSH_POINTS, SPAWNS, inBuyZone, LEVEL, getPracticeRoutes } from './steelfall.js';
 import { hasLineOfSight, castWorld } from './raycast.js';
 import {
   world, eyePosition, headCenter, chestCenter, currentWeaponRuntime,
@@ -55,6 +55,8 @@ export function createAI(entity, difficultyId) {
     targetLastSeen: -99,
     targetLastPos: null,
     reactionTimer: 0,
+    firstShotTimer: 0,
+    lastTargetSwitch: -99,
     acquiredAt: -99,
     fireTimer: 0,
     burstShots: 0,
@@ -302,6 +304,78 @@ export function botBuy(entity, store, difficultyId) {
 }
 
 // ------------------------------------------------------------------ main AI tick
+/**
+ * Practice-range target behaviour. Instead of fighting, these bots run drills
+ * so the player can rehearse tracking: a walker, a sprinter, a zigzagger and a
+ * strafer. They still shoot back occasionally so the range is not a shooting
+ * gallery, but they never push.
+ */
+function tickPracticeTarget({ ai, actor, entity, store, dt }) {
+  const routes = getPracticeRoutes();
+  if (!routes.length) return false;
+
+  if (!ai.drill) {
+    // actor.index can be missing for late-created runtimes, so fall back to a
+    // stable hash of the id rather than indexing with undefined.
+    const seed = Number.isFinite(actor.index)
+      ? actor.index
+      : Math.abs([...String(actor.id)].reduce((h, c) => h + c.charCodeAt(0), 0));
+    const r = routes[seed % routes.length] || routes[0];
+    if (!r) return false;
+    ai.drill = { mode: r.mode, points: r.points, idx: 0, dir: 1, t: 0 };
+  }
+  const d = ai.drill;
+  if (!d || !d.points || !d.points.length) return false;
+  d.t += dt;
+
+  const target = d.points[d.idx] || d.points[0];
+  let gx = target[0];
+  let gz = target[2];
+
+  // zigzag weaves perpendicular to the path so tracking is non-trivial
+  if (d.mode === 'zigzag') {
+    gx += Math.sin(d.t * 3.2) * 3.2;
+  } else if (d.mode === 'strafe') {
+    gx += Math.sin(d.t * 2.1) * 2.4;
+  }
+
+  const dx = gx - actor.pos[0];
+  const dz = gz - actor.pos[2];
+  const dist = Math.hypot(dx, dz);
+  if (dist < 1.4) {
+    d.idx += d.dir;
+    if (d.idx >= d.points.length) { d.idx = d.points.length - 2; d.dir = -1; }
+    if (d.idx < 0) { d.idx = 1; d.dir = 1; }
+  }
+
+  const inv = 1 / (dist || 1);
+  const wx = dx * inv;
+  const wz = dz * inv;
+
+  // face travel direction, but glance toward the player so they read as alive
+  const player = world.actors[store.playerId];
+  if (player && player.alive && Math.sin(d.t * 0.6) > 0.2) {
+    const px = player.pos[0] - actor.pos[0];
+    const pz = player.pos[2] - actor.pos[2];
+    ai.aimYaw = Math.atan2(-px, -pz);
+  } else {
+    ai.aimYaw = Math.atan2(-wx, -wz);
+  }
+  actor.yaw = ai.aimYaw;
+  actor.pitch = 0;
+
+  const li = toLocalInput(actor, wx, wz);
+  const input = {
+    forward: li.forward,
+    right: li.right,
+    jump: false,
+    sprint: d.mode === 'run',
+    crouch: false,
+  };
+  moveActor(actor, input, dt, entity);
+  return true;
+}
+
 export function tickBot({ ai, actor, entity, store, dt, phase, swapped }) {
   ai.ownerId = actor.id;
   ai.stateTime += dt;
@@ -312,6 +386,11 @@ export function tickBot({ ai, actor, entity, store, dt, phase, swapped }) {
   const eye = eyePosition(actor);
 
   const input = { forward: 0, right: 0, jump: false, sprint: false, crouch: false };
+
+  // Practice range: run movement drills rather than fight.
+  if (store.practice) {
+    if (tickPracticeTarget({ ai, actor, entity, store, dt })) return;
+  }
 
   // ---------------- buy phase behaviour: stay in spawn, face out
   if (phase === PHASE.BUY || phase === PHASE.WARMUP) {
@@ -370,14 +449,19 @@ export function tickBot({ ai, actor, entity, store, dt, phase, swapped }) {
     bb.lastContact = world.time;
     ai.targetLastSeen = world.time;
     ai.targetLastPos = [...visible.pos];
-    if (!ai.target || ai.target !== visible.id) {
+    const switchOk = world.time - ai.lastTargetSwitch > (diff.targetSwitchDelay || 0.5);
+    if (!ai.target || (ai.target !== visible.id && switchOk)) {
       ai.target = visible.id;
       ai.acquiredAt = world.time;
-      // reaction delay before the bot may shoot (PRD §8 difficulty)
+      ai.lastTargetSwitch = world.time;
+      // Reaction delay before the bot even starts tracking (PRD §8).
       const [lo, hi] = diff.reactionTime;
       ai.reactionTimer = lo + Math.random() * (hi - lo);
-      // pre-aim skill: better bots snap closer instantly
-      if (Math.random() < diff.preAimSkill) ai.reactionTimer *= 0.55;
+      if (Math.random() < diff.preAimSkill) ai.reactionTimer *= 0.7;
+      // A second beat between "tracking you" and "firing", so engagements
+      // start readably instead of the player dying to an instant burst.
+      const [flo, fhi] = diff.firstShotDelay || [0.2, 0.35];
+      ai.firstShotTimer = flo + Math.random() * (fhi - flo);
     }
   } else if (ai.target) {
     const t = world.actors[ai.target];
@@ -641,8 +725,9 @@ export function tickBot({ ai, actor, entity, store, dt, phase, swapped }) {
 
   if (visible && !blinded) {
     ai.reactionTimer -= dt;
+    if (ai.reactionTimer <= 0) ai.firstShotTimer -= dt;
     const aimed = Math.abs(dyaw) < (visibleDist > 25 ? 0.035 : 0.075);
-    if (ai.reactionTimer <= 0 && aimed && !wr.reloading) {
+    if (ai.reactionTimer <= 0 && ai.firstShotTimer <= 0 && aimed && !wr.reloading) {
       // ADS for accuracy at range
       actor.wantAds = visibleDist > 12 || weapon.scope?.overlay;
       // burst discipline
@@ -669,7 +754,12 @@ export function tickBot({ ai, actor, entity, store, dt, phase, swapped }) {
         ];
         // Blend the bot's (noisy) facing toward the true hitbox only partially —
         // a high blend makes diff.aimError meaningless and bots hit ~100%.
-        const blend = 0.18 + diff.preAimSkill * 0.22;
+        // Deliberate imperfection. `missBias` pushes a fraction of shots wide
+        // on purpose so a bot reads as a person rather than a turret.
+        const intentionalMiss = Math.random() < (diff.missBias ?? 0.3);
+        const blend = intentionalMiss
+          ? 0.05
+          : 0.18 + diff.preAimSkill * 0.22;
         const dir = [
           face[0] * (1 - blend) + (adx / al) * blend,
           face[1] * (1 - blend) + (ady / al) * blend,
@@ -683,7 +773,8 @@ export function tickBot({ ai, actor, entity, store, dt, phase, swapped }) {
         const rangeF = Math.min(2.2, 0.5 + visibleDist / 26);
         const moveF = 1 + Math.min(1.2, Math.hypot(actor.vel[0], actor.vel[2]) / 4);
         const sprayF = 1 + Math.min(1.5, ai.burstShots * 0.16);
-        const coneDeg = diff.aimError * rangeF * moveF * sprayF;
+        let coneDeg = diff.aimError * rangeF * moveF * sprayF;
+        if (intentionalMiss) coneDeg *= 2.4;
         shotDir = randomConeDir(shotDir, coneDeg);
 
         const fired = fireWeapon({ actor, entity, store, phase, aimOverride: shotDir });

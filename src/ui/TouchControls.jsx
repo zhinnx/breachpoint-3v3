@@ -93,12 +93,35 @@ const IcoPause = () => (
   </svg>
 );
 
-const UTIL_MARK = {
-  frag: '#4b5320',
-  flash: '#c9ccd1',
-  smoke: '#8e44ff',
-  medkit: '#d33',
-};
+/** Distinct silhouettes: colour alone was unreadable at thumb size. */
+const IcoFrag = () => (
+  <svg viewBox="0 0 24 24" {...S}>
+    <path d="M12 21a6 6 0 0 0 6-6c0-3-2-5-4-7l-2-2-2 2c-2 2-4 4-4 7a6 6 0 0 0 6 6Z" />
+    <path d="M12 4V2M10 3h4" />
+  </svg>
+);
+const IcoFlash = () => (
+  <svg viewBox="0 0 24 24" {...S}>
+    <path d="M9 8h6v9a3 3 0 0 1-3 3 3 3 0 0 1-3-3V8Z" />
+    <path d="M10 8V5h4v3M12 3v2" />
+    <path d="M4 12h2M18 12h2M6 7l1.5 1.5M18 7l-1.5 1.5" />
+  </svg>
+);
+const IcoSmoke = () => (
+  <svg viewBox="0 0 24 24" {...S}>
+    <path d="M9 9h6v9a3 3 0 0 1-3 3 3 3 0 0 1-3-3V9Z" />
+    <path d="M9 9V6h6v3" />
+    <path d="M6 5c1.5 0 1.5-2 3-2M15 3c1.5 0 1.5 2 3 2" />
+  </svg>
+);
+const IcoMed = () => (
+  <svg viewBox="0 0 24 24" {...S}>
+    <path d="M4 7h16v12H4zM8 7V5h8v2" />
+    <path d="M12 10v6M9 13h6" />
+  </svg>
+);
+const UTIL_ICON = { frag: IcoFrag, flash: IcoFlash, smoke: IcoSmoke, medkit: IcoMed };
+const UTIL_TINT = { frag: '#7d8a4a', flash: '#e8e4d8', smoke: '#a97fe0', medkit: '#e0736a' };
 
 /** Hold-style button: engages on pointerdown, releases on up/cancel. */
 function HoldButton({ cls, onDown, onUp, children, label, active, disabled, count }) {
@@ -223,6 +246,45 @@ export function TouchControls({ sim }) {
     if (knobEl.current) knobEl.current.style.transform = 'translate(0px, 0px)';
   }, [sim]);
 
+  /* --------------------------------------------- fire: hold AND drag-aim */
+  const fireId = useRef(null);
+  const fireLast = useRef([0, 0]);
+  const [firing, setFiring] = useState(false);
+
+  const fireDown = useCallback((e) => {
+    if (fireId.current !== null) return;
+    e.preventDefault();
+    e.stopPropagation();
+    fireId.current = e.pointerId;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    fireLast.current = [e.clientX, e.clientY];
+    setFiring(true);
+    sim.input.fire = true;
+  }, [sim]);
+
+  const fireMove = useCallback((e) => {
+    if (fireId.current !== e.pointerId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const dx = e.clientX - fireLast.current[0];
+    const dy = e.clientY - fireLast.current[1];
+    fireLast.current = [e.clientX, e.clientY];
+    // Slightly lower gain than the look pad: this thumb is also holding the
+    // trigger, so it needs finer control, not faster turning.
+    const sens = LOOK_SENS * 1000 * (ads ? 0.5 : 0.82);
+    sim.mouseDelta[0] += dx * sens * 0.28;
+    sim.mouseDelta[1] += dy * sens * 0.28;
+  }, [sim, ads]);
+
+  const fireUp = useCallback((e) => {
+    if (fireId.current !== e.pointerId) return;
+    e.preventDefault();
+    e.stopPropagation();
+    fireId.current = null;
+    setFiring(false);
+    sim.input.fire = false;
+  }, [sim]);
+
   /* ------------------------------------------------------- look drag */
   const lookDown = useCallback((e) => {
     if (lookId.current !== null) return;
@@ -261,6 +323,8 @@ export function TouchControls({ sim }) {
     sim.input.forward = 0;
     sim.input.right = 0;
     sim.input.jump = false;
+    fireId.current = null;
+    setFiring(false);
     setSprint(false);
     setAds(false);
   }, [canAct, alive, paused, buyOpen, sim]);
@@ -325,11 +389,19 @@ export function TouchControls({ sim }) {
           />
 
           {/* action cluster */}
-          <HoldButton
-            cls="tbtn-fire" label="Fire"
-            onDown={() => { sim.input.fire = true; }}
-            onUp={() => { sim.input.fire = false; }}
-          ><IcoFire /></HoldButton>
+          {/* Fire is not a plain button: once held, dragging the same finger
+              keeps shooting AND steers the camera, which is how mobile
+              shooters let you track a target while firing. */}
+          <button
+            type="button"
+            className={`tbtn tbtn-fire ${firing ? 'down' : ''}`}
+            aria-label="Fire"
+            onPointerDown={fireDown}
+            onPointerMove={fireMove}
+            onPointerUp={fireUp}
+            onPointerCancel={fireUp}
+            onContextMenu={(e) => e.preventDefault()}
+          ><IcoFire /></button>
 
           <HoldButton
             cls="tbtn-ads" label="Aim down sight" active={ads}
@@ -367,27 +439,27 @@ export function TouchControls({ sim }) {
 
           {/* utility rail */}
           <div className="util-dock">
-            {['frag', 'flash', 'smoke'].map((u) => (
-              <HoldButton
-                key={u}
-                cls="" label={u}
-                disabled={!util[u]}
-                count={util[u] || 0}
-                onDown={() => { if (util[u]) sim.input.throwUtil = u; }}
-              >
-                <span
-                  className="util-mark"
-                  style={{ background: UTIL_MARK[u], display: 'block' }}
-                />
-              </HoldButton>
-            ))}
+            {['frag', 'flash', 'smoke'].map((u) => {
+              const Ico = UTIL_ICON[u];
+              return (
+                <HoldButton
+                  key={u}
+                  cls="" label={u}
+                  disabled={!util[u]}
+                  count={util[u] || 0}
+                  onDown={() => { if (util[u]) sim.input.throwUtil = u; }}
+                >
+                  <span style={{ color: UTIL_TINT[u], display: 'flex' }}><Ico /></span>
+                </HoldButton>
+              );
+            })}
             <HoldButton
               cls="" label="medkit"
               disabled={!util.medkit}
               count={util.medkit || 0}
               onDown={() => { if (util.medkit) sim.input.heal = true; }}
             >
-              <span className="util-mark" style={{ background: UTIL_MARK.medkit, display: 'block' }} />
+              <span style={{ color: UTIL_TINT.medkit, display: 'flex' }}><IcoMed /></span>
             </HoldButton>
           </div>
         </>

@@ -9,7 +9,7 @@
 import React, { useRef, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
-import { getOperatorMaterials } from './materials.js';
+import { getOperatorMaterials, getOutlineMaterial } from './materials.js';
 import { WeaponSilhouette } from './WeaponModels.jsx';
 import { MOVE } from '../game/config.js';
 
@@ -20,6 +20,31 @@ const B = ({ p, s, r, m, ...rest }) => (
 );
 
 /** Full third-person operator. Animated by the actor runtime. */
+/**
+ * Team outline. An inverted-hull shell drawn with BackSide + depthTest off, so
+ * an operator reads through cover-adjacent gloom and at distance. Enemies get
+ * red, friendlies blue. Without this, players reported simply not being able
+ * to see anyone.
+ */
+function OutlineShell({ team, height, crouch }) {
+  const mat = getOutlineMaterial(team);
+  const scaleY = 1 - crouch * 0.28;
+  return (
+    <group renderOrder={2}>
+      {/* torso + head block, slightly inflated */}
+      <mesh position={[0, 0.86 + 0.2 * scaleY, 0]} material={mat} scale={[1.14, scaleY * 1.06, 1.16]}>
+        <boxGeometry args={[0.42, 0.5, 0.28]} />
+      </mesh>
+      <mesh position={[0, 1.52 * scaleY, 0]} material={mat} scale={[1.16, 1.1, 1.16]}>
+        <boxGeometry args={[0.22, 0.25, 0.23]} />
+      </mesh>
+      <mesh position={[0, 0.45 * scaleY, 0]} material={mat} scale={[1.1, scaleY, 1.12]}>
+        <boxGeometry args={[0.4, 0.62, 0.24]} />
+      </mesh>
+    </group>
+  );
+}
+
 export function Operator({ actor, entity, isEnemy }) {
   const group = useRef();
   const hips = useRef();
@@ -89,6 +114,9 @@ export function Operator({ actor, entity, isEnemy }) {
 
   return (
     <group ref={group}>
+      {actor?.alive && (
+        <OutlineShell team={entity.team} height={1.8} crouch={actor.crouch || 0} />
+      )}
       <group ref={hips} position={[0, 0, 0]}>
         {/* ---------- legs: cargo trousers + boots ---------- */}
         <group ref={legL} position={[-0.11, 0.82, 0]}>

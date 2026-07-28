@@ -34,6 +34,7 @@ export const world = {
   hitmarkerTime: -10,
   hitmarkerKind: 'body',
   damageIndicators: [],
+  damageNumbers: [],
   paused: false,
   spectatorOf: null,
   aceCamActive: false,
@@ -68,6 +69,8 @@ export function createActorRuntime(entity) {
     team: entity.team,
     isPlayer: entity.isPlayer,
     isBot: entity.isBot,
+    index: entity.index ?? 0,
+    team0: entity.team,
     pos: [...entity.pos],
     prevPos: [...entity.pos],
     vel: [0, 0, 0],
@@ -135,6 +138,7 @@ export function resetWorldActors(entities, order) {
   world.decals.length = 0;
   world.shells.length = 0;
   world.damageIndicators.length = 0;
+  world.damageNumbers.length = 0;
   world.camShake = 0;
   world.localBlind = 0;
 }
@@ -383,6 +387,21 @@ export function addCamShake(amount) {
   world.camShake = Math.min(1.6, world.camShake + amount);
 }
 
+/** Floating damage number above a hit enemy. */
+export function spawnDamageNumber(pos, amount, headshot, killed) {
+  world.damageNumbers.push({
+    key: nid(),
+    pos: [pos[0], pos[1] + 0.12, pos[2]],
+    drift: [(Math.random() - 0.5) * 0.35, 0.9 + Math.random() * 0.3, (Math.random() - 0.5) * 0.35],
+    amount: Math.round(amount),
+    headshot: !!headshot,
+    killed: !!killed,
+    t: 0,
+    life: 0.95,
+  });
+  if (world.damageNumbers.length > 26) world.damageNumbers.shift();
+}
+
 export function addDamageIndicator(dir) {
   world.damageIndicators.push({ key: nid(), dir: [...dir], t: 0, life: 1.2 });
   if (world.damageIndicators.length > 8) world.damageIndicators.shift();
@@ -403,6 +422,7 @@ export function tickTransients(dt) {
   step(world.decals);
   step(world.explosions);
   step(world.damageIndicators);
+  step(world.damageNumbers);
 
   // shells fall with gravity
   for (let i = world.shells.length - 1; i >= 0; i--) {

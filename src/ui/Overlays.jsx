@@ -7,6 +7,7 @@ import React, { useEffect } from 'react';
 import { useGame } from '../game/store.js';
 import { MATCH } from '../game/config.js';
 import { useDevice } from './useDevice.js';
+import { getMapName } from '../game/steelfall.js';
 import * as Audio from '../game/audio.js';
 
 // Fill ramp for plates/pips; text ramp for type on dark (contrast-verified).
@@ -68,7 +69,7 @@ export function Scoreboard() {
   return (
     <div className="scoreboard">
       <div className="sb-head">
-        <span className="sb-map">STEELFALL</span>
+        <span className="sb-map">{getMapName()}</span>
         <span className="sb-sc num">
           <b style={{ color: TEAM_VAR[playerTeam] }}>{score[playerTeam]}</b>
           <span style={{ color: 'var(--gun-hi)' }}> : </span>
@@ -188,7 +189,7 @@ export function PostMatch() {
           <em>:</em>
           <span style={{ color: TEAM_VAR[enemy] }}>{score[enemy]}</span>
         </div>
-        <div className="sum-mode">{mode.name} · {mode.tag} · STEELFALL</div>
+        <div className="sum-mode">{mode.name} · {mode.tag} · {getMapName()}</div>
       </div>
 
       {mvp && (

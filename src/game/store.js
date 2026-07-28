@@ -11,7 +11,7 @@ import {
   PHASE, TIMERS, MATCH, ECONOMY, COMBAT, TEAM, DIFFICULTY, GAME_MODES, KILLFEED_TTL,
 } from './config.js';
 import { WEAPONS, UTILITY, getWeapon, resolveDamage } from './weapons.js';
-import { SPAWNS, inBuyZone } from './steelfall.js';
+import { SPAWNS, inBuyZone, setActiveMap } from './steelfall.js';
 
 let _uid = 1;
 const uid = () => `e${_uid++}`;
@@ -140,6 +140,8 @@ export const useGame = create((set, get) => ({
     const mode = GAME_MODES.find((m) => m.id === modeId) || GAME_MODES[0];
     const difficulty = mode.difficulty;
     const practice = mode.id === 'practice';
+    // Swap the active map BEFORE spawns are read: practice uses its own yard.
+    setActiveMap(mode.mapId || 'dustline');
     const playerTeam = TEAM.BLUE;
 
     const entities = {};
@@ -204,6 +206,18 @@ export const useGame = create((set, get) => ({
       paused: false,
     });
     get().resetRoundEntities();
+
+    // Practice range: no countdown, no buy phase, just start. The player also
+    // begins with a rifle and full utility so there is nothing to wait for.
+    if (practice) {
+      const st = get();
+      for (const id of st.order) {
+        const e = st.entities[id];
+        st.buyWeapon(id, e.isPlayer ? 'vanguard7' : 'raptor9');
+      }
+      set({ buyMenuOpen: false });
+      get().setPhase(PHASE.COMBAT, 9999);
+    }
   },
 
   returnToLobby: () => set({
@@ -328,6 +342,13 @@ export const useGame = create((set, get) => ({
       default:
         break;
     }
+  },
+
+  /** Player pressed READY during the buy phase: start the round immediately. */
+  readyUp: () => {
+    const s = get();
+    if (s.phase !== PHASE.BUY && s.phase !== PHASE.WARMUP) return;
+    set({ phaseTime: 0.35 });
   },
 
   beginCombat: () => {

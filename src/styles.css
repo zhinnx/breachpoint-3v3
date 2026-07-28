@@ -1112,6 +1112,13 @@ input[type='range']::-moz-range-thumb {
 .util-key { font-family: var(--f-num); font-size: 8px; color: var(--conc); }
 .util-n { font-family: var(--f-num); font-size: var(--t-xs); font-weight: 700; }
 .util-mark { width: 12px; height: 12px; }
+.util-code {
+  font-family: var(--f-num);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  line-height: 1;
+}
 
 .slots { display: flex; gap: var(--s0); }
 .slot {
@@ -1402,6 +1409,8 @@ input[type='range']::-moz-range-thumb {
   color: var(--amber);
   line-height: 1;
 }
+
+.buy-ready { min-height: 40px; padding: 0 var(--s4); font-size: var(--t-sm); }
 
 .buy-tabs { display: flex; gap: 2px; padding: 0 var(--s4); background: var(--char-deep); border-bottom: 1px solid var(--gun); }
 .buy-tabs button {

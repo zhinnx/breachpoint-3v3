@@ -14,7 +14,7 @@ import { PHASE, MATCH } from '../game/config.js';
 import { getWeapon, UTILITY } from '../game/weapons.js';
 import { world, currentWeaponRuntime } from '../game/world.js';
 import { computeSpread } from '../game/combat.js';
-import { PLAY, brushes } from '../game/steelfall.js';
+import { PLAY, brushes, getMapName } from '../game/steelfall.js';
 import { useDevice } from './useDevice.js';
 
 // Fill ramp for plates/pips; text ramp for type on dark (contrast-verified).
@@ -254,7 +254,7 @@ function Minimap() {
   return (
     <div className="minimap brk">
       <canvas ref={canvasRef} width={SIZE} height={SIZE} />
-      <div className="mm-tag">STEELFALL</div>
+      <div className="mm-tag">{getMapName()}</div>
     </div>
   );
 }
@@ -406,11 +406,13 @@ function Ammo() {
       <div className="util-row">
         {['frag', 'flash', 'smoke', 'medkit'].map((u, i) => {
           const n = entity.loadout.utility[u] || 0;
-          const color = { frag: '#4b5320', flash: '#c9ccd1', smoke: '#8e44ff', medkit: '#d33' }[u];
+          // Short letter codes read far faster than colour swatches.
+          const code = { frag: 'FRG', flash: 'FLS', smoke: 'SMK', medkit: 'MED' }[u];
+          const color = { frag: '#7d8a4a', flash: '#e8e4d8', smoke: '#a97fe0', medkit: '#e0736a' }[u];
           return (
             <div key={u} className={`util-chip ${n > 0 ? 'has' : ''}`} title={UTILITY[u].name}>
               <span className="util-key">{u === 'medkit' ? 'F' : i + 3}</span>
-              <span className="util-mark" style={{ background: color }} />
+              <span className="util-code" style={{ color }}>{code}</span>
               <span className="util-n num">{n}</span>
             </div>
           );
