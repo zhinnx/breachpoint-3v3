@@ -8,7 +8,7 @@ import { Simulation } from '../src/game/simulation.js';
 import { PHASE, MATCH, ECONOMY } from '../src/game/config.js';
 import { buildNavMesh, navStats, findPath } from '../src/game/navmesh.js';
 import { world } from '../src/game/world.js';
-import { MAP_META, COVER_POINTS, SPAWNS } from '../src/game/steelfall.js';
+import { MAP_META, COVER_POINTS, SPAWNS, PLAY } from '../src/game/steelfall.js';
 import { hasLineOfSight, castWorld } from '../src/game/raycast.js';
 
 let failures = 0;
@@ -173,8 +173,14 @@ check('MVP computed', !!final.mvpId, final.mvpId ? final.entities[final.mvpId].n
 check('credits stayed in bounds',
   final.order.every((id) => final.entities[id].credits >= 0 && final.entities[id].credits <= ECONOMY.maxCredits));
 
-// no actor fell out of the world
-const oob = world.actorList.filter((a) => a.pos[1] < -2 || Math.abs(a.pos[0]) > 30 || Math.abs(a.pos[2]) > 35);
+// No actor fell out of the world. Bounds come from the ACTIVE map rather than
+// hardcoded numbers, which silently went stale when the map grew from 50x60 to
+// 68x76 and started reporting legal spawn positions as escapes.
+const oob = world.actorList.filter((a) => (
+  a.pos[1] < -2
+  || a.pos[0] < PLAY.minX - 1 || a.pos[0] > PLAY.maxX + 1
+  || a.pos[2] < PLAY.minZ - 1 || a.pos[2] > PLAY.maxZ + 1
+));
 check('no actor escaped the map', oob.length === 0, oob.length ? JSON.stringify(oob.map((a) => a.pos)) : '');
 
 console.log('\n[4] Final scoreboard');
